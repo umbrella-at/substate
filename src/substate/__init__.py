@@ -26,6 +26,7 @@ from substate.models import (
 )
 from substate.money import Discount, fixed_discount, percent_discount, percent_of
 from substate.periods import Period, PeriodUnit
+from substate.storage import MemoryStorage, Storage
 
 __all__ = [
     "Accrual",
@@ -36,6 +37,7 @@ __all__ = [
     "InvalidPeriod",
     "InvalidPlan",
     "InvalidPromoCode",
+    "MemoryStorage",
     "Payment",
     "Period",
     "PeriodUnit",
@@ -46,6 +48,7 @@ __all__ = [
     "ReferralProgram",
     "ScopeKind",
     "State",
+    "Storage",
     "Subscription",
     "SubstateError",
     "SystemClock",
