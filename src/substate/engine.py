@@ -10,7 +10,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from substate.clock import Clock, SystemClock
-from substate.errors import AlreadySubscribed, DuplicatePlan, UnknownPlan
+from substate.errors import AlreadySubscribed, DuplicatePlan, NotSubscribed, UnknownPlan
 from substate.events import (
     Event,
     PaymentDuplicate,
@@ -18,6 +18,7 @@ from substate.events import (
     PaymentUnderpaid,
     PaymentUnmatched,
     SubscriptionActivated,
+    SubscriptionCancelled,
     SubscriptionCreated,
     SubscriptionEnteringGrace,
     SubscriptionExpired,
@@ -125,6 +126,34 @@ class SubscriptionEngine:
             subscription.state = State.EXPIRED
             subscription.trial_ends_at = None
             subscription.expires_at = now
+
+    async def cancel(self, user_id: str) -> Subscription:
+        """Stop the renewals and keep access to the paid boundary.
+
+        Cancelling twice is not an error, it is nothing: the second call
+        returns the same subscription and emits no event, the way a webhook
+        delivered twice does. Cancelling a trial writes the trial boundary
+        into `expires_at`, so every cancelled record looks the same from here
+        on and `tick()` can see when it ends.
+        """
+        now = self._clock.now()
+        subscription, events = await self._load_and_advance(user_id)
+        if subscription is None:
+            raise NotSubscribed(f"{user_id!r} has no subscription")
+
+        if subscription.state is State.CANCELLED:
+            self._publish(events)
+            return subscription
+
+        subscription.state = State.CANCELLED
+        subscription.cancelled_at = now
+        if subscription.expires_at is None:
+            subscription.expires_at = subscription.trial_ends_at
+        await self._storage.save_subscription(subscription)
+
+        events.append(SubscriptionCancelled(user_id, now, access_until=subscription.access_until))
+        self._publish(events)
+        return subscription
 
     async def apply_payment(self, payment: Payment) -> list[Event]:
         """Record a payment and let it move the subscription. Returns what happened.
