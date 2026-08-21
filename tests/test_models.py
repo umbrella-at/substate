@@ -153,6 +153,37 @@ def test_an_expired_subscription_has_no_access() -> None:
     assert not subscription(state=State.EXPIRED).is_active
 
 
+def test_access_during_a_trial_runs_to_the_end_of_the_trial() -> None:
+    trial_ends = datetime(2026, 1, 4, tzinfo=UTC)
+    sub = subscription(state=State.TRIAL, trial_ends_at=trial_ends, expires_at=None)
+
+    assert sub.access_until == trial_ends
+
+
+def test_access_while_active_runs_to_the_expiry() -> None:
+    assert subscription(state=State.ACTIVE).access_until == JANUARY
+
+
+def test_access_inside_grace_runs_to_the_end_of_grace() -> None:
+    """Grace is access past the expiry, so the boundary moves with it."""
+    assert subscription(state=State.GRACE, grace_days=3).access_until == JANUARY + timedelta(days=3)
+
+
+def test_access_after_cancelling_runs_to_the_paid_expiry() -> None:
+    sub = subscription(state=State.CANCELLED, cancelled_at=JANUARY)
+
+    assert sub.access_until == JANUARY
+
+
+def test_access_of_an_expired_subscription_ended_at_its_expiry() -> None:
+    """Nothing is left, and the property says when that happened."""
+    assert subscription(state=State.EXPIRED).access_until == JANUARY
+
+
+def test_access_is_unknown_before_any_boundary_is_set() -> None:
+    assert subscription(state=State.TRIAL, trial_ends_at=None, expires_at=None).access_until is None
+
+
 def test_the_due_boundary_of_a_trial_is_the_end_of_the_trial() -> None:
     trial_ends = datetime(2026, 1, 4, tzinfo=UTC)
     sub = subscription(state=State.TRIAL, trial_ends_at=trial_ends, expires_at=None)

@@ -205,12 +205,25 @@ class Subscription:
         return self.state is not State.EXPIRED
 
     @property
-    def due_at(self) -> datetime | None:
-        """The boundary the current state is waiting on, or None if there is none."""
+    def access_until(self) -> datetime | None:
+        """When access ends in the current state.
+
+        The companion of `is_active`: the application asks when rather than
+        whether, and still does not enumerate states by hand.
+        """
         if self.state is State.TRIAL:
             return self.trial_ends_at
         if self.state is State.GRACE:
             return self.grace_ends_at
-        if self.state in (State.ACTIVE, State.CANCELLED):
-            return self.expires_at
-        return None
+        return self.expires_at
+
+    @property
+    def due_at(self) -> datetime | None:
+        """The boundary the current state is waiting on, or None if there is none.
+
+        The same boundary as `access_until`, except that an expired
+        subscription is not waiting for anything any more.
+        """
+        if self.state is State.EXPIRED:
+            return None
+        return self.access_until
