@@ -45,7 +45,7 @@ async def main():
     ))
 
     sub = await engine.subscribe("user_1", "pro_month")
-    print(sub.state, sub.expires_at)      # State.TRIAL 2026-01-04
+    print(sub.state, sub.access_until)    # State.TRIAL 2026-01-04
 
     await engine.apply_payment(Payment(
         provider="cryptobot",
