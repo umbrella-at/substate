@@ -119,3 +119,8 @@ def test_the_system_clock_is_the_one_place_that_reads_the_wall_clock() -> None:
     source = (Path(substate.__file__).parent / "clock.py").read_text(encoding="utf-8")
 
     assert source.count("datetime.now(") == 1
+
+
+def test_a_frozen_clock_says_what_time_it_is_stuck_at() -> None:
+    """A failing time test should not report an object address."""
+    assert repr(FrozenClock("2026-01-01")) == "FrozenClock('2026-01-01T00:00:00+00:00')"
