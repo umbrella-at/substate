@@ -22,6 +22,7 @@ from substate.events import (
     SubscriptionCreated,
     SubscriptionEnteringGrace,
     SubscriptionExpired,
+    SubscriptionPlanChanged,
     SubscriptionRenewed,
 )
 from substate.models import Payment, Plan, State, Subscription
@@ -152,6 +153,38 @@ class SubscriptionEngine:
         await self._storage.save_subscription(subscription)
 
         events.append(SubscriptionCancelled(user_id, now, access_until=subscription.access_until))
+        self._publish(events)
+        return subscription
+
+    async def change_plan(self, user_id: str, plan_id: str) -> Subscription:
+        """Record a plan change for the end of the paid period.
+
+        Nothing moves now: no money is counted and `expires_at` stays where it
+        is. The new plan governs the next period, applied by the payment that
+        buys it. Naming the plan the subscription is already on cancels a
+        pending change instead of scheduling a pointless one.
+        """
+        self._plan(plan_id)
+        now = self._clock.now()
+        subscription, events = await self._load_and_advance(user_id)
+        if subscription is None:
+            raise NotSubscribed(f"{user_id!r} has no subscription")
+
+        if plan_id == subscription.plan_id and subscription.pending_plan_id is None:
+            self._publish(events)
+            return subscription
+
+        subscription.pending_plan_id = None if plan_id == subscription.plan_id else plan_id
+        await self._storage.save_subscription(subscription)
+
+        events.append(
+            SubscriptionPlanChanged(
+                user_id,
+                now,
+                plan_id=subscription.plan_id,
+                pending_plan_id=subscription.pending_plan_id,
+            )
+        )
         self._publish(events)
         return subscription
 
