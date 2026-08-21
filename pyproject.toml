@@ -1,0 +1,79 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "substate"
+version = "0.1.0.dev0"
+description = "Subscription lifecycle for Python: trials, renewals, grace periods, promo codes and referrals"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Andrei Tarunin" }]
+keywords = ["subscription", "billing", "recurring", "payments", "state-machine"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Office/Business :: Financial",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# Upper bounds on purpose: a new ruff or mypy release must not turn CI red
+# on a repository nobody touched. Bump these deliberately.
+dev = [
+    "pytest>=9,<10",
+    "pytest-asyncio>=1.4,<2",
+    "pytest-cov>=7,<8",
+    "ruff>=0.16.4,<0.17",
+    "mypy>=2.3,<3",
+]
+
+[project.urls]
+Homepage = "https://github.com/umbrella-at/substate"
+Repository = "https://github.com/umbrella-at/substate"
+Issues = "https://github.com/umbrella-at/substate/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/substate"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+# Code blocks in README are laid out for reading, not for the formatter.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "SIM",  # simplify
+    "RUF",  # ruff-specific
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "--strict-markers"
+
+[tool.coverage.run]
+source = ["src/substate"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
