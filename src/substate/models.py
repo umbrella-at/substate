@@ -167,12 +167,17 @@ class Subscription:
     Policy is stored as a snapshot (`grace_days`, `billing_anchor_day`) rather
     than read back from the plan: editing a plan tomorrow must not rewrite what
     was promised today. Store the policy, compute the moment.
+
+    `trial_started_at` is the same idea applied to the trial: the record
+    remembers that it was granted, so a second cycle does not hand out a
+    second free one.
     """
 
     user_id: str
     plan_id: str
     state: State
     trial_ends_at: datetime | None = None
+    trial_started_at: datetime | None = None
     expires_at: datetime | None = None
     grace_days: int = 0
     billing_anchor_day: int | None = None

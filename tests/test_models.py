@@ -217,6 +217,7 @@ def test_a_subscription_starts_without_referrer_pending_plan_or_promo() -> None:
     assert sub.pending_plan_id is None
     assert sub.promo_code is None
     assert sub.promo_periods_left is None
+    assert sub.trial_started_at is None
     assert sub.cancelled_at is None
     assert sub.billing_anchor_day is None
 
@@ -226,6 +227,18 @@ def test_a_subscription_rejects_a_negative_grace_snapshot(grace_days: int) -> No
     """A grace that ends before the period it follows is not a grace."""
     with pytest.raises(ValueError):
         subscription(grace_days=grace_days)
+
+
+def test_a_subscription_remembers_when_its_trial_was_granted() -> None:
+    """A second cycle must not hand out a second free trial."""
+    granted = datetime(2026, 1, 1, tzinfo=UTC)
+    sub = subscription(state=State.TRIAL, trial_started_at=granted)
+
+    assert sub.trial_started_at == granted
+
+
+def test_a_subscription_starts_with_no_trial_on_record() -> None:
+    assert subscription().trial_started_at is None
 
 
 def test_a_subscription_is_a_record_the_engine_moves() -> None:
