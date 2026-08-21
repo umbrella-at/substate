@@ -24,6 +24,10 @@ class InvalidPeriod(SubstateError, ValueError):
     """A period of zero or negative length."""
 
 
+class InvalidReferralProgram(SubstateError, ValueError):
+    """A referral program whose percentage is off the scale."""
+
+
 class UnknownPlan(SubstateError):
     """No plan is registered under this id."""
 

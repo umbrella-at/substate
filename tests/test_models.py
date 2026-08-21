@@ -10,6 +10,7 @@ from substate import (
     Accrual,
     InvalidPlan,
     InvalidPromoCode,
+    InvalidReferralProgram,
     Payment,
     Period,
     Plan,
@@ -318,8 +319,13 @@ def test_the_two_accrual_rules() -> None:
 
 @pytest.mark.parametrize("percent", [-1, 101])
 def test_a_referral_percent_outside_the_scale_is_rejected(percent: int) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidReferralProgram):
         ReferralProgram(id="x", percent=percent, accrual=Accrual.EVERY_PAYMENT)
+
+
+def test_an_invalid_referral_program_is_also_a_value_error() -> None:
+    with pytest.raises(ValueError):
+        ReferralProgram(id="x", percent=101, accrual=Accrual.EVERY_PAYMENT)
 
 
 def test_a_zero_percent_program_is_legal() -> None:

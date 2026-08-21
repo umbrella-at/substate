@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 
-from substate.errors import InvalidPlan, InvalidPromoCode
+from substate.errors import InvalidPlan, InvalidPromoCode, InvalidReferralProgram
 from substate.periods import Period
 
 LAST_POSSIBLE_DAY_OF_MONTH = 31
@@ -157,7 +157,7 @@ class ReferralProgram:
 
     def __post_init__(self) -> None:
         if not 0 <= self.percent <= 100:
-            raise ValueError(f"percent must be between 0 and 100, got {self.percent}")
+            raise InvalidReferralProgram(f"percent must be between 0 and 100, got {self.percent}")
 
 
 @dataclass

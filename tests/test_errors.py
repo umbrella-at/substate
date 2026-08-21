@@ -9,6 +9,7 @@ from substate import (
     InvalidPeriod,
     InvalidPlan,
     InvalidPromoCode,
+    InvalidReferralProgram,
     SubstateError,
     UnknownPlan,
 )
@@ -17,11 +18,12 @@ EVERY_ERROR = [
     InvalidPlan,
     InvalidPromoCode,
     InvalidPeriod,
+    InvalidReferralProgram,
     UnknownPlan,
     AlreadySubscribed,
 ]
 
-VALIDATION_ERRORS = [InvalidPlan, InvalidPromoCode, InvalidPeriod]
+VALIDATION_ERRORS = [InvalidPlan, InvalidPromoCode, InvalidPeriod, InvalidReferralProgram]
 
 
 @pytest.mark.parametrize("error", EVERY_ERROR)

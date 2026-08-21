@@ -9,6 +9,7 @@ from substate.errors import (
     InvalidPeriod,
     InvalidPlan,
     InvalidPromoCode,
+    InvalidReferralProgram,
     SubstateError,
     UnknownPlan,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "InvalidPeriod",
     "InvalidPlan",
     "InvalidPromoCode",
+    "InvalidReferralProgram",
     "MemoryStorage",
     "Payment",
     "Period",
