@@ -13,11 +13,17 @@ from substate.clock import Clock, SystemClock
 from substate.errors import AlreadySubscribed, DuplicatePlan, UnknownPlan
 from substate.events import (
     Event,
+    PaymentDuplicate,
+    PaymentRecorded,
+    PaymentUnderpaid,
+    PaymentUnmatched,
+    SubscriptionActivated,
     SubscriptionCreated,
     SubscriptionEnteringGrace,
     SubscriptionExpired,
+    SubscriptionRenewed,
 )
-from substate.models import Plan, State, Subscription
+from substate.models import Payment, Plan, State, Subscription
 from substate.storage import Storage
 
 # A subscription can cross at most two boundaries (ACTIVE -> GRACE -> EXPIRED).
@@ -120,6 +126,114 @@ class SubscriptionEngine:
             subscription.trial_ends_at = None
             subscription.expires_at = now
 
+    async def apply_payment(self, payment: Payment) -> list[Event]:
+        """Record a payment and let it move the subscription. Returns what happened.
+
+        Idempotent by `(provider, external_id)`: a pair already on file returns
+        a single `payment.duplicate` and touches nothing, because a retried
+        webhook is not a reason to advance the world. `tick()` is.
+
+        Otherwise the payment is written down first, then the subscription is
+        caught up with the clock, and only then does the money apply. Catching
+        up first is what keeps a payment on a long-stale trial from renewing
+        into the past.
+
+        The amount is compared with the price of the plan that will govern the
+        new period, which is the pending one if a plan change is waiting.
+        """
+        now = self._clock.now()
+        if await self._storage.get_payment(payment.provider, payment.external_id) is not None:
+            return self._returned(
+                [
+                    PaymentDuplicate(
+                        payment.user_id,
+                        now,
+                        provider=payment.provider,
+                        external_id=payment.external_id,
+                    )
+                ]
+            )
+
+        await self._storage.save_payment(payment)
+        subscription, events = await self._load_and_advance(payment.user_id)
+        events.append(
+            PaymentRecorded(
+                payment.user_id,
+                now,
+                provider=payment.provider,
+                external_id=payment.external_id,
+                amount=payment.amount,
+            )
+        )
+
+        if subscription is None or subscription.state is State.CANCELLED:
+            events.append(
+                PaymentUnmatched(
+                    payment.user_id,
+                    now,
+                    provider=payment.provider,
+                    external_id=payment.external_id,
+                    amount=payment.amount,
+                )
+            )
+            return self._returned(events)
+
+        plan = self._plan(subscription.pending_plan_id or subscription.plan_id)
+        if payment.amount < plan.price:
+            events.append(
+                PaymentUnderpaid(
+                    payment.user_id,
+                    now,
+                    provider=payment.provider,
+                    external_id=payment.external_id,
+                    amount=payment.amount,
+                    expected=plan.price,
+                )
+            )
+            return self._returned(events)
+
+        events.append(self._start_period(subscription, plan, now))
+        await self._storage.save_subscription(subscription)
+        return self._returned(events)
+
+    def _start_period(self, subscription: Subscription, plan: Plan, now: datetime) -> Event:
+        """Move a paid-for subscription into its next period. Does not save.
+
+        The billing anchor pins to the date the period is counted from, and
+        only when a cycle starts. A renewal continues the cycle and leaves the
+        anchor alone; an expired subscription paying again restarts it, so the
+        anchor moves to the payment date. Without that, an anchor of the 15th
+        and a payment on the 7th would buy eight days instead of a month.
+        """
+        previous = subscription.state
+        anchor = subscription.billing_anchor_day
+        # A subscription always carries the boundary its state is measured by;
+        # the fallbacks keep a damaged record from turning a payment into a crash.
+        if previous is State.TRIAL:
+            base = subscription.trial_ends_at or now
+            anchor = base.day
+        elif previous is State.EXPIRED:
+            base = now
+            anchor = now.day
+        else:
+            base = subscription.expires_at or now
+
+        subscription.plan_id = plan.id
+        subscription.pending_plan_id = None
+        subscription.grace_days = plan.grace_days
+        subscription.billing_anchor_day = anchor
+        subscription.cancelled_at = None
+        subscription.state = State.ACTIVE
+        subscription.expires_at = plan.period.next_boundary(base, anchor)
+
+        if previous is State.ACTIVE:
+            return SubscriptionRenewed(
+                subscription.user_id, now, plan_id=plan.id, expires_at=subscription.expires_at
+            )
+        return SubscriptionActivated(
+            subscription.user_id, now, plan_id=plan.id, expires_at=subscription.expires_at
+        )
+
     async def is_active(self, user_id: str) -> bool:
         """Whether this user has access right now, by the engine's clock.
 
@@ -198,6 +312,12 @@ class SubscriptionEngine:
             return SubscriptionExpired(user_id, boundary, reason="grace_ended")
         subscription.state = State.EXPIRED
         return SubscriptionExpired(user_id, boundary, reason="cancelled")
+
+    def _returned(self, events: list[Event]) -> list[Event]:
+        """Order a call's events by when they happened, publish them, hand them back."""
+        events.sort(key=lambda event: event.occurred_at)
+        self._publish(events)
+        return events
 
     def _publish(self, events: list[Event]) -> None:
         if self._on_event is None:
