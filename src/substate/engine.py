@@ -266,6 +266,10 @@ class SubscriptionEngine:
         anchor alone; an expired subscription paying again restarts it, so the
         anchor moves to the payment date. Without that, an anchor of the 15th
         and a payment on the 7th would buy eight days instead of a month.
+
+        Whatever the branch, the period that comes out of this ends in the
+        future. A payment that bought a period already over would be money for
+        nothing.
         """
         previous = subscription.state
         anchor = subscription.billing_anchor_day
@@ -280,13 +284,22 @@ class SubscriptionEngine:
         else:
             base = subscription.expires_at or now
 
+        expires_at = plan.period.next_boundary(base, anchor)
+        if expires_at <= now:
+            # The debt rule ran past its own period: an old plan's grace can
+            # outlast the whole period of the plan replacing it. A payment
+            # always buys a period that is still ahead, so this one restarts
+            # the cycle from its own date, anchor and all.
+            anchor = now.day
+            expires_at = plan.period.next_boundary(now, anchor)
+
         subscription.plan_id = plan.id
         subscription.pending_plan_id = None
         subscription.grace_days = plan.grace_days
         subscription.billing_anchor_day = anchor
         subscription.cancelled_at = None
         subscription.state = State.ACTIVE
-        subscription.expires_at = plan.period.next_boundary(base, anchor)
+        subscription.expires_at = expires_at
 
         if previous is State.ACTIVE:
             return SubscriptionRenewed(

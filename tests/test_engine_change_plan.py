@@ -269,3 +269,59 @@ async def test_a_cancelled_subscription_can_be_switched_too() -> None:
 
     assert sub.state is State.CANCELLED
     assert sub.pending_plan_id == "annual"
+
+
+async def test_a_short_new_plan_cannot_buy_a_period_that_already_ended() -> None:
+    """Grace counts the debt from the old boundary, but never into the past.
+
+    The old plan's grace can outlast the new plan's whole period, and then the
+    debt rule would hand back an expiry three days before the payment. When
+    that happens the payment starts a fresh cycle from its own date instead.
+    """
+    clock = FrozenClock(START)
+    engine = SubscriptionEngine(storage=MemoryStorage(), clock=clock)
+    engine.register_plan(
+        plan("monthly", price=29900, period=Period.days(30), trial_days=0, grace_days=20)
+    )
+    engine.register_plan(
+        plan("weekly", price=9900, period=Period.days(7), trial_days=0, grace_days=0)
+    )
+    await engine.subscribe("user_1", "monthly")
+    await engine.apply_payment(payment())
+    await engine.change_plan("user_1", "weekly")
+    clock.advance(days=40)  # 10 February, day ten of a twenty day grace
+    await engine.tick()
+
+    events = await engine.apply_payment(payment(external_id="inv_2", amount=9900))
+
+    assert names(events) == ["payment.recorded", "subscription.activated"]
+    sub = await engine.get_subscription("user_1")
+    assert sub is not None
+    assert sub.expires_at == utc(2026, 2, 17)
+    assert sub.billing_anchor_day == 10
+    assert await engine.is_active("user_1") is True
+    assert await engine.tick() == []
+
+
+async def test_a_new_plan_that_fits_still_counts_the_grace_as_debt() -> None:
+    """The clamp is a floor, not a rewrite: an ordinary downgrade still owes its days."""
+    clock = FrozenClock(START)
+    engine = SubscriptionEngine(storage=MemoryStorage(), clock=clock)
+    engine.register_plan(
+        plan("monthly", price=29900, period=Period.days(30), trial_days=0, grace_days=5)
+    )
+    engine.register_plan(
+        plan("weekly", price=9900, period=Period.days(7), trial_days=0, grace_days=0)
+    )
+    await engine.subscribe("user_1", "monthly")
+    await engine.apply_payment(payment())  # paid to 31 January
+    await engine.change_plan("user_1", "weekly")
+    clock.advance(days=33)  # 3 February, day three of a five day grace
+    await engine.tick()
+
+    await engine.apply_payment(payment(external_id="inv_2", amount=9900))
+
+    sub = await engine.get_subscription("user_1")
+    assert sub is not None
+    assert sub.expires_at == utc(2026, 2, 7)  # 31 January + 7 days: the debt stands
+    assert sub.billing_anchor_day == 1  # pinned at the first payment, untouched by grace
