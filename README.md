@@ -3,9 +3,9 @@
 Subscription lifecycle for Python: trials, renewals, grace periods, promo codes and referrals, lifted out of your application into a core you can actually test.
 
 [![CI](https://github.com/umbrella-at/substate/actions/workflows/ci.yml/badge.svg)](https://github.com/umbrella-at/substate/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/substate)](https://pypi.org/project/substate/)
-[![Python](https://img.shields.io/pypi/pyversions/substate)](https://pypi.org/project/substate/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+<!-- PyPI badges go back in with the v0.1.0 release -->
 
 <!-- TODO before release: asciinema cast of the test suite fast-forwarding a year of subscriptions in ~200ms -->
 
