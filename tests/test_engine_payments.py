@@ -336,3 +336,42 @@ async def test_paying_restores_access_immediately() -> None:
     await engine.apply_payment(payment(amount=9900))
 
     assert await engine.is_active("user_1") is True
+
+
+async def test_a_boundary_the_payment_caught_up_on_is_written_down() -> None:
+    """A crossing is crossed once. If a catch-up is not saved, tick emits it again."""
+    clock = FrozenClock(START)
+    engine = world(clock)
+    await engine.subscribe("user_1", "pro")
+    clock.advance(days=40)  # the trial ended on 4 January and nothing has run since
+
+    events = await engine.apply_payment(payment(amount=100))  # too little to activate
+
+    assert names(events) == ["subscription.expired", "payment.recorded", "payment.underpaid"]
+    sub = await engine.get_subscription("user_1")
+    assert sub is not None and sub.state is State.EXPIRED
+    assert await engine.tick() == []
+
+
+async def test_a_payment_revives_a_cancelled_subscription_that_already_lapsed() -> None:
+    """Catch-up runs first, so by payment time the record is EXPIRED, not CANCELLED.
+
+    The table then applies the EXPIRED row: money buys a period from today. A
+    cancelled subscription is only unmatched while its paid period still runs.
+    """
+    clock = FrozenClock(START)
+    engine = world(clock)
+    await engine.subscribe("user_1", "pro")
+    await engine.apply_payment(payment())
+    await engine.cancel("user_1")
+    clock.advance(days=40)  # past the cancelled subscription's paid boundary
+
+    events = await engine.apply_payment(payment(external_id="inv_2"))
+
+    assert names(events) == ["subscription.expired", "payment.recorded", "subscription.activated"]
+    sub = await engine.get_subscription("user_1")
+    assert sub is not None
+    assert sub.state is State.ACTIVE
+    assert sub.expires_at == utc(2026, 3, 12)
+    assert sub.cancelled_at is None
+    assert await engine.tick() == []
