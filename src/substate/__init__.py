@@ -12,10 +12,23 @@ from substate.errors import (
     SubstateError,
     UnknownPlan,
 )
+from substate.models import (
+    Accrual,
+    Payment,
+    Plan,
+    PromoCode,
+    PromoKind,
+    PromoScope,
+    ReferralProgram,
+    ScopeKind,
+    State,
+    Subscription,
+)
 from substate.money import Discount, fixed_discount, percent_discount, percent_of
 from substate.periods import Period, PeriodUnit
 
 __all__ = [
+    "Accrual",
     "AlreadySubscribed",
     "Clock",
     "Discount",
@@ -23,8 +36,17 @@ __all__ = [
     "InvalidPeriod",
     "InvalidPlan",
     "InvalidPromoCode",
+    "Payment",
     "Period",
     "PeriodUnit",
+    "Plan",
+    "PromoCode",
+    "PromoKind",
+    "PromoScope",
+    "ReferralProgram",
+    "ScopeKind",
+    "State",
+    "Subscription",
     "SubstateError",
     "SystemClock",
     "UnknownPlan",
