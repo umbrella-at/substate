@@ -32,5 +32,18 @@ class UnknownPlan(SubstateError):
     """No plan is registered under this id."""
 
 
+class DuplicatePlan(SubstateError):
+    """A plan is already registered under this id.
+
+    Plans are immutable for the life of an engine. Changing one means building
+    a new engine, which is a restart, not a silent price change under a
+    subscription that is already running.
+    """
+
+
 class AlreadySubscribed(SubstateError):
     """The user already holds a live subscription."""
+
+
+class NotSubscribed(SubstateError):
+    """The user has no subscription at all, so there is nothing to act on."""

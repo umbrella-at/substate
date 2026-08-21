@@ -6,10 +6,12 @@ The public API is intentionally small. See README.md for the shape it will take.
 from substate.clock import Clock, FrozenClock, SystemClock
 from substate.errors import (
     AlreadySubscribed,
+    DuplicatePlan,
     InvalidPeriod,
     InvalidPlan,
     InvalidPromoCode,
     InvalidReferralProgram,
+    NotSubscribed,
     SubstateError,
     UnknownPlan,
 )
@@ -34,12 +36,14 @@ __all__ = [
     "AlreadySubscribed",
     "Clock",
     "Discount",
+    "DuplicatePlan",
     "FrozenClock",
     "InvalidPeriod",
     "InvalidPlan",
     "InvalidPromoCode",
     "InvalidReferralProgram",
     "MemoryStorage",
+    "NotSubscribed",
     "Payment",
     "Period",
     "PeriodUnit",
