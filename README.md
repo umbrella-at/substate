@@ -114,6 +114,23 @@ subscription renewed from a two-month-old date would land entirely in the past.
 Transitions are driven by four calls and the clock: `subscribe()`, `apply_payment()`,
 `change_plan()`, `cancel()` and `tick()`. Nothing changes state behind your back.
 
+## Checking access
+
+```python
+if await engine.is_active("user_1"):
+    ...
+```
+
+`engine.is_active()` compares the subscription's boundary against the injected clock,
+so it is correct the moment a period ends rather than the next time `tick()` runs.
+That gap is not theoretical: `tick()` usually runs from cron every few minutes, and
+without this a cancelled subscription would keep access until the next run.
+
+`Subscription.is_active` also exists, as a pure predicate over state with no notion
+of time, and `Subscription.access_until` gives the boundary for whatever state the
+subscription is in. Reach for the engine method unless you specifically want the
+state check.
+
 ## Events
 
 The core knows nothing about notifications. It emits events, your application decides what to do with them.
@@ -130,8 +147,26 @@ payment.recorded            payment.duplicate
 payment.underpaid           payment.unmatched
 ```
 
-Every event carries `user_id` and `occurred_at`, taken from the injected clock.
-`tick()` returns them in chronological order.
+Every event carries `user_id` and an `occurred_at` set to the moment the transition
+logically happened, not the moment you called into the engine. Fast-forward a month
+and the grace period still starts on the day it was due.
+
+Pass a sink and it sees everything, including events from calls that hand back a
+subscription rather than a list:
+
+```python
+journal: list[Event] = []
+engine = SubscriptionEngine(storage, clock=clock, on_event=journal.append)
+```
+
+The sink runs after the new state has been persisted, so a failing notification
+cannot roll back a transition. Keep it cheap: push onto a queue, do not do IO in it.
+
+`apply_payment()` and `tick()` also return their events directly, because a payment
+or a jump in the clock can set off a chain the caller cannot predict. `subscribe()`,
+`cancel()` and `change_plan()` return the subscription instead: they produce at most
+one event of their own, and you already know which one. The sink may additionally
+see boundaries the call caught up on.
 
 ## Money
 
