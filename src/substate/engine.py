@@ -7,6 +7,7 @@ Nothing here happens on its own. Five calls and a clock move a subscription:
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 from substate.clock import Clock, SystemClock
@@ -312,15 +313,29 @@ class SubscriptionEngine:
     async def is_active(self, user_id: str) -> bool:
         """Whether this user has access right now, by the engine's clock.
 
-        `Subscription.is_active` answers by state alone and cannot know that a
-        boundary passed four minutes ago. This one compares with the clock, so
-        access ends on time rather than at the next `tick()`.
+        Exact at any moment, including between the boundary and the `tick()`
+        that will record it: the answer is worked out on a copy advanced to the
+        clock, so a paid-up customer inside their grace period is not turned
+        away while the cron job is asleep, and a lapsed one is not let in.
+
+        Nothing is written and nothing is published. This runs on every request;
+        a getter that emitted `subscription.expired` on each call would be worse
+        than the problem it solves. Catching the stored state up is `tick()`'s
+        job, and its alone.
         """
         subscription = await self._storage.get_subscription(user_id)
-        if subscription is None or not subscription.is_active:
+        if subscription is None:
             return False
-        access_until = subscription.access_until
-        return access_until is not None and self._clock.now() < access_until
+
+        now = self._clock.now()
+        ahead = replace(subscription)  # a copy: never saved, its events dropped
+        self._advance(ahead, now)
+        if not ahead.is_active:
+            return False
+        # Advancing the copy already leaves every boundary ahead of `now`; the
+        # comparison is the definition of the predicate rather than the work.
+        access_until = ahead.access_until
+        return access_until is not None and now < access_until
 
     def _plan(self, plan_id: str) -> Plan:
         try:
@@ -339,7 +354,12 @@ class SubscriptionEngine:
         return subscription, events
 
     async def get_subscription(self, user_id: str) -> Subscription | None:
-        """The stored subscription, exactly as written. This advances nothing."""
+        """The stored subscription, exactly as written. This advances nothing.
+
+        The record may be behind the clock: a period can have ended without
+        anything having run to notice. For the access question ask
+        `is_active`, which is exact at any moment; to move the world, `tick()`.
+        """
         return await self._storage.get_subscription(user_id)
 
     async def tick(self) -> list[Event]:

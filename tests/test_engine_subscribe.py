@@ -13,6 +13,7 @@ from substate import (
     FrozenClock,
     InvalidPlan,
     MemoryStorage,
+    Payment,
     Period,
     Plan,
     State,
@@ -291,6 +292,66 @@ async def test_access_a_moment_before_the_boundary() -> None:
     clock.advance(days=3, microseconds=-1)
 
     assert await engine.is_active("user_1") is True
+
+
+async def test_access_continues_through_a_grace_that_has_not_run_out() -> None:
+    """Grace is access. The answer must not wait for the cron job to notice."""
+    clock = FrozenClock(START)
+    engine = world(clock)
+    await engine.subscribe("user_1", "pro")
+    await engine.apply_payment(
+        Payment(provider="cryptobot", external_id="inv_1", user_id="user_1", amount=29900)
+    )
+    clock.advance(days=35)  # 5 February: the period ended on the 3rd, grace runs to the 8th
+
+    assert await engine.is_active("user_1") is True
+
+
+async def test_the_answer_does_not_change_when_tick_finally_runs() -> None:
+    """Same clock, same answer, whether or not the world has been advanced yet."""
+    clock = FrozenClock(START)
+    engine = world(clock)
+    await engine.subscribe("user_1", "pro")
+    await engine.apply_payment(
+        Payment(provider="cryptobot", external_id="inv_1", user_id="user_1", amount=29900)
+    )
+    clock.advance(days=35)
+
+    before = await engine.is_active("user_1")
+    await engine.tick()
+    after = await engine.is_active("user_1")
+
+    assert (before, after) == (True, True)
+
+
+async def test_access_ends_with_the_grace_even_without_a_tick() -> None:
+    clock = FrozenClock(START)
+    engine = world(clock)
+    await engine.subscribe("user_1", "pro")
+    await engine.apply_payment(
+        Payment(provider="cryptobot", external_id="inv_1", user_id="user_1", amount=29900)
+    )
+    clock.advance(days=39)  # 9 February, one day past the grace
+
+    assert await engine.is_active("user_1") is False
+
+
+async def test_asking_about_access_emits_nothing() -> None:
+    """It runs on every request. If it published, one stale trial would flood the journal."""
+    clock = FrozenClock(START)
+    storage = MemoryStorage()
+    sink: list[Event] = []
+    engine = world(clock, storage, sink)
+    await engine.subscribe("user_1", "pro")
+    clock.advance(days=40)
+    sink.clear()
+
+    for _ in range(5):
+        assert await engine.is_active("user_1") is False
+
+    assert sink == []
+    stored = await storage.get_subscription("user_1")
+    assert stored is not None and stored.state is State.TRIAL
 
 
 async def test_asking_about_access_changes_nothing() -> None:
