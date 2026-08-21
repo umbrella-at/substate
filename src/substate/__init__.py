@@ -12,6 +12,7 @@ from substate.errors import (
     SubstateError,
     UnknownPlan,
 )
+from substate.periods import Period, PeriodUnit
 
 __all__ = [
     "AlreadySubscribed",
@@ -20,6 +21,8 @@ __all__ = [
     "InvalidPeriod",
     "InvalidPlan",
     "InvalidPromoCode",
+    "Period",
+    "PeriodUnit",
     "SubstateError",
     "SystemClock",
     "UnknownPlan",
