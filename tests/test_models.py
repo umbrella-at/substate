@@ -189,6 +189,13 @@ def test_a_subscription_starts_without_referrer_pending_plan_or_promo() -> None:
     assert sub.billing_anchor_day is None
 
 
+@pytest.mark.parametrize("grace_days", [-1, -30])
+def test_a_subscription_rejects_a_negative_grace_snapshot(grace_days: int) -> None:
+    """A grace that ends before the period it follows is not a grace."""
+    with pytest.raises(ValueError):
+        subscription(grace_days=grace_days)
+
+
 def test_a_subscription_is_a_record_the_engine_moves() -> None:
     sub = subscription()
 

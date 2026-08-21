@@ -183,6 +183,8 @@ class Subscription:
     cancelled_at: datetime | None = None
 
     def __post_init__(self) -> None:
+        if self.grace_days < 0:
+            raise ValueError(f"grace_days must not be negative, got {self.grace_days}")
         if self.billing_anchor_day is not None:
             _check_day_of_month(self.billing_anchor_day)
 
