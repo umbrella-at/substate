@@ -160,6 +160,20 @@ async def test_an_expired_record_starts_a_new_cycle() -> None:
     assert sub.state is State.EXPIRED
 
 
+async def test_a_record_that_never_had_a_trial_still_gets_one() -> None:
+    """The other half of the restart rule: unused trials are not forfeited by a cycle."""
+    clock = FrozenClock(START)
+    engine = world(clock)
+    await engine.subscribe("user_1", "lite")  # no trial on this plan
+    clock.advance(days=1)
+
+    sub = await engine.subscribe("user_1", "pro")
+
+    assert sub.state is State.TRIAL
+    assert sub.trial_ends_at == utc(2026, 1, 5)
+    assert sub.trial_started_at == utc(2026, 1, 2)
+
+
 async def test_a_second_cycle_does_not_hand_out_a_second_trial() -> None:
     """Otherwise subscribe, wait, subscribe is free service forever."""
     clock = FrozenClock(START)
