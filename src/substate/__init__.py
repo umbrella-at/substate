@@ -12,11 +12,13 @@ from substate.errors import (
     SubstateError,
     UnknownPlan,
 )
+from substate.money import Discount, fixed_discount, percent_discount, percent_of
 from substate.periods import Period, PeriodUnit
 
 __all__ = [
     "AlreadySubscribed",
     "Clock",
+    "Discount",
     "FrozenClock",
     "InvalidPeriod",
     "InvalidPlan",
@@ -27,6 +29,9 @@ __all__ = [
     "SystemClock",
     "UnknownPlan",
     "__version__",
+    "fixed_discount",
+    "percent_discount",
+    "percent_of",
 ]
 
 __version__ = "0.1.0.dev0"
