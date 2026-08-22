@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import inspect
+import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,6 +18,8 @@ from substate import (
     Payment,
     Period,
     Plan,
+    PromoCode,
+    PromoKind,
     ReferralProgram,
     State,
     Subscription,
@@ -280,3 +285,74 @@ def test_the_readme_lists_every_event_the_core_emits() -> None:
 
 def test_the_list_is_the_thirteen_from_the_spec() -> None:
     assert len(emitted_events()) == 13
+
+
+async def test_the_promo_example_from_the_readme() -> None:
+    """The outage story: register PLUS_DAYS, hand it out, everyone gets three days."""
+    clock = FrozenClock("2026-01-01")
+    engine = SubscriptionEngine(storage=MemoryStorage(), clock=clock)
+    engine.register_plan(PRO_MONTH)
+    for user_id in ("user_1", "user_2"):
+        await engine.subscribe(user_id, "pro_month")
+        await engine.apply_payment(
+            Payment(
+                provider="cryptobot",
+                external_id=f"inv_{user_id}",
+                user_id=user_id,
+                amount=5_000_000,
+            )
+        )
+
+    engine.register_promo_code(
+        PromoCode(
+            code="SORRY",
+            kind=PromoKind.PLUS_DAYS,
+            value=3,
+        )
+    )
+
+    affected = ["user_1", "user_2"]
+    for user_id in affected:
+        await engine.redeem(user_id, "SORRY")
+
+    for user_id in affected:
+        sub = await engine.get_subscription(user_id)
+        assert sub is not None
+        assert sub.expires_at == datetime(2026, 2, 6, tzinfo=UTC)  # 3 February plus three
+        assert sub.promo_code is None  # PLUS_DAYS binds nothing
+
+
+async def test_the_webhook_example_from_the_readme() -> None:
+    """The adapter snippet, from signed bytes to an activated subscription."""
+    from substate.adapters.cryptobot import CryptoBotWebhook
+
+    CRYPTO_PAY_TOKEN = "12345:AAbbCCddEEff"
+    body = json.dumps(
+        {
+            "update_id": 1,
+            "update_type": "invoice_paid",
+            "payload": {
+                "invoice_id": 528890,
+                "status": "paid",
+                "asset": "USDT",
+                "amount": "5",
+                "payload": "user_1",
+            },
+        }
+    ).encode()
+    signature = hmac.new(
+        hashlib.sha256(CRYPTO_PAY_TOKEN.encode()).digest(), body, hashlib.sha256
+    ).hexdigest()
+
+    engine = SubscriptionEngine(storage=MemoryStorage(), clock=FrozenClock("2026-01-01"))
+    engine.register_plan(PRO_MONTH)
+    await engine.subscribe("user_1", "pro_month")
+
+    webhook = CryptoBotWebhook(token=CRYPTO_PAY_TOKEN)
+
+    parsed = webhook.parse(body, signature)
+    events = await engine.apply_payment(parsed.payment)
+
+    assert parsed.currency == "USDT"
+    assert parsed.payment.amount == 5_000_000  # 5.00 USDT in minor units
+    assert [event.name for event in events] == ["payment.recorded", "subscription.activated"]

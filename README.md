@@ -177,6 +177,32 @@ Integers in minor units, everywhere, including discount math. No floats, no `Dec
 
 A plan is priced in the unit its provider actually pays in — USDT through CryptoBot, XTR through Stars — and nothing is ever converted. `Plan.currency` is a label the core does not interpret, the scale behind it belongs to the adapter, and a second provider means a second plan rather than an exchange rate.
 
+## Promo codes
+
+Three kinds. `PERCENT` and `FIXED` attach to the subscription and come off the
+payments that follow; `PLUS_DAYS` is spent the moment it is claimed and moves
+whichever boundary the subscription is running on.
+
+```python
+engine.register_promo_code(PromoCode(
+    code="SORRY",
+    kind=PromoKind.PLUS_DAYS,
+    value=3,
+))
+
+# the service was down for a day: give everyone their three days back
+for user_id in affected:
+    await engine.redeem(user_id, "SORRY")
+```
+
+That is what `redeem()` exists for. Without it there is no way to extend a
+subscription that is already running, which is the one thing you need at the
+moment you least want to be writing code.
+
+Limits (`max_redemptions`, `max_per_user`) count redemptions rather than
+payments, and they are checked atomically: somebody who claims a code and never
+pays has still spent their slot.
+
 ## Referrals come with programs
 
 Most referral code hardcodes one percentage. Real programs are not one percentage:
@@ -217,6 +243,29 @@ Storage, behind one protocol:
 | SQLAlchemy (async) | planned |
 
 Both are plain protocols. Writing your own is roughly forty lines.
+
+## Taking money
+
+An adapter turns a signed webhook into a payment. It creates no invoices and
+opens no sockets:
+
+```python
+from substate.adapters.cryptobot import CryptoBotWebhook
+
+webhook = CryptoBotWebhook(token=CRYPTO_PAY_TOKEN)
+
+parsed = webhook.parse(body, signature)      # raw request bytes, header value
+events = await engine.apply_payment(parsed.payment)
+```
+
+`body` must be the bytes the socket delivered: the signature covers those, and a
+framework that parses the JSON and serialises it again will break the check.
+Amounts are read into minor units with `Decimal`, never `float`, and the invoice
+must carry the subscriber's id in its `payload`.
+
+Answer an `AdapterError` with 400 and do not retry it — a body that will never
+verify will never verify — and keep 500 for your own failures, which are worth
+retrying.
 
 ## What substate does not do
 
