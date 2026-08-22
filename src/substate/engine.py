@@ -380,19 +380,30 @@ class SubscriptionEngine:
     async def apply_payment(self, payment: Payment) -> list[Event]:
         """Record a payment and let it move the subscription. Returns what happened.
 
+        The order is: check the configuration, check for a duplicate, write the
+        payment down, catch the subscription up with the clock, and only then
+        let the money apply.
+
+        Configuration errors come first because an exception that means "this
+        server is set up wrong" must be raised before anything is written. Once
+        the payment is on file, every retry of that webhook meets the duplicate
+        guard and returns `[duplicate]`, so the subscription would never
+        activate however quickly the configuration was repaired.
+
         Idempotent by `(provider, external_id)`: a pair already on file returns
         a single `payment.duplicate` and touches nothing, because a retried
         webhook is not a reason to advance the world. `tick()` is.
 
-        Otherwise the payment is written down first, then the subscription is
-        caught up with the clock, and only then does the money apply. Catching
-        up first is what keeps a payment on a long-stale trial from renewing
-        into the past.
+        Catching the subscription up before applying the money is what keeps a
+        payment on a long-stale trial from renewing into the past.
 
         The amount is compared with the price of the plan that will govern the
         new period, which is the pending one if a plan change is waiting.
         """
         now = self._clock.now()
+        subscription = await self._storage.get_subscription(payment.user_id)
+        self._check_configured(subscription)
+
         if await self._storage.get_payment(payment.provider, payment.external_id) is not None:
             return self._returned(
                 [
@@ -406,7 +417,9 @@ class SubscriptionEngine:
             )
 
         await self._storage.save_payment(payment)
-        subscription, events = await self._load_and_advance(payment.user_id)
+        events: list[Event] = []
+        if subscription is not None:
+            events = await self._advance_and_save(subscription)
         events.append(
             PaymentRecorded(
                 payment.user_id,
@@ -611,10 +624,27 @@ class SubscriptionEngine:
         subscription = await self._storage.get_subscription(user_id)
         if subscription is None:
             return None, []
+        return subscription, await self._advance_and_save(subscription)
+
+    async def _advance_and_save(self, subscription: Subscription) -> list[Event]:
+        """Cross whatever boundaries have passed, and write the result down."""
         events = self._advance(subscription, self._clock.now())
         if events:
             await self._storage.save_subscription(subscription)
-        return subscription, events
+        return events
+
+    def _check_configured(self, subscription: Subscription | None) -> None:
+        """Refuse to work on a subscription this engine cannot price.
+
+        Raised before anything is written: a plan or a code that this engine
+        never registered is a deployment mistake, and a deployment mistake has
+        to stay repairable.
+        """
+        if subscription is None:
+            return
+        self._plan(subscription.pending_plan_id or subscription.plan_id)
+        if subscription.promo_code is not None:
+            self._promo_code(subscription.promo_code)
 
     async def get_subscription(self, user_id: str) -> Subscription | None:
         """The stored subscription, exactly as written. This advances nothing.

@@ -528,3 +528,30 @@ async def test_a_duplicate_payment_does_not_spend_a_promo_period() -> None:
 
     sub = await engine.get_subscription("user_1")
     assert sub is not None and sub.promo_periods_left == 1
+
+
+async def test_a_bound_code_missing_from_the_registry_stops_the_payment_before_it_is_recorded() -> (
+    None
+):
+    """A misconfigured server must fail where the failure can still be fixed.
+
+    Recorded first, the payment would be a duplicate on every retry, and the
+    subscription would never activate however fast the registry was repaired.
+    """
+    clock = FrozenClock(START)
+    storage = MemoryStorage()
+    engine = world(clock, promo(applies_to=PromoScope.forever()), storage=storage)
+    await engine.subscribe("user_1", "pro", promo="SUMMER")
+    await engine.apply_payment(payment(amount=20930))
+    renewal = payment(external_id="inv_2", amount=20930)
+
+    forgetful = world(clock, storage=storage)  # same data, a config that lost the code
+    with pytest.raises(UnknownPromoCode):
+        await forgetful.apply_payment(renewal)
+
+    assert await storage.get_payment("cryptobot", "inv_2") is None
+
+    repaired = world(clock, promo(applies_to=PromoScope.forever()), storage=storage)
+    events = await repaired.apply_payment(renewal)
+
+    assert names(events) == ["payment.recorded", "subscription.renewed"]
