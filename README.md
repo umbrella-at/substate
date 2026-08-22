@@ -38,8 +38,8 @@ async def main():
 
     engine.register_plan(Plan(
         id="pro_month",
-        price=29900,              # minor units, always integers
-        currency="RUB",
+        price=5_000_000,          # 5.00 USDT, minor units
+        currency="USDT",
         period=Period.days(30),
         trial_days=3,
     ))
@@ -51,7 +51,7 @@ async def main():
         provider="cryptobot",
         external_id="inv_12345",          # calling this twice changes nothing
         user_id="user_1",
-        amount=29900,
+        amount=5_000_000,
     ))
 
     sub = await engine.get_subscription("user_1")
@@ -171,7 +171,9 @@ see boundaries the call caught up on.
 
 ## Money
 
-Integers in minor units (kopecks, cents), everywhere, including discount math. No floats, no `Decimal` surprises. Rounding is explicit and covered by a test.
+Integers in minor units, everywhere, including discount math. No floats, no `Decimal` surprises. Rounding is explicit and covered by a test.
+
+A plan is priced in the unit its provider actually pays in — USDT through CryptoBot, XTR through Stars — and nothing is ever converted. `Plan.currency` is a label the core does not interpret, the scale behind it belongs to the adapter, and a second provider means a second plan rather than an exchange rate.
 
 ## Referrals come with programs
 
@@ -223,6 +225,9 @@ Deliberately, so the scope stays small enough to finish:
 - **No framework coupling.** No aiogram, no FastAPI, no Django. Bring your own.
 - **No background scheduler.** You call `tick()` from your own cron, worker or startup hook.
 - **No proration.** A plan change takes effect at the end of the paid period, and moves no money. Prorated switching is v0.2.
+- **No currency reconciliation.** A plan is denominated in one unit, the payment arrives in that
+  same unit, and nothing checks one against the other because there is nothing to check. Taking a
+  second provider means registering a second plan.
 - **No refunds or chargebacks.**
 - **No invoicing, receipts, tax or accounting.**
 

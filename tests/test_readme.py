@@ -25,8 +25,8 @@ from substate import events as event_types
 
 PRO_MONTH = Plan(
     id="pro_month",
-    price=29900,  # minor units, always integers
-    currency="RUB",
+    price=5_000_000,  # 5.00 USDT, minor units
+    currency="USDT",
     period=Period.days(30),
     trial_days=3,
 )
@@ -45,7 +45,7 @@ async def test_the_quickstart_prints_what_it_says_it_prints() -> None:
             provider="cryptobot",
             external_id="inv_12345",
             user_id="user_1",
-            amount=29900,
+            amount=5_000_000,
         )
     )
 
@@ -58,7 +58,9 @@ async def test_the_same_webhook_twice_changes_nothing_as_advertised() -> None:
     engine = SubscriptionEngine(storage=MemoryStorage(), clock=FrozenClock("2026-01-01"))
     engine.register_plan(PRO_MONTH)
     await engine.subscribe("user_1", "pro_month")
-    invoice = Payment(provider="cryptobot", external_id="inv_12345", user_id="user_1", amount=29900)
+    invoice = Payment(
+        provider="cryptobot", external_id="inv_12345", user_id="user_1", amount=5_000_000
+    )
 
     await engine.apply_payment(invoice)
     events = await engine.apply_payment(invoice)
@@ -123,7 +125,7 @@ async def test_the_journal_sink_from_the_readme() -> None:
 
     await engine.subscribe("user_1", "pro_month")
     returned = await engine.apply_payment(
-        Payment(provider="cryptobot", external_id="inv_12345", user_id="user_1", amount=29900)
+        Payment(provider="cryptobot", external_id="inv_12345", user_id="user_1", amount=5_000_000)
     )
     await engine.cancel("user_1")
 
@@ -160,7 +162,7 @@ async def test_the_sink_never_runs_before_the_state_is_saved() -> None:
 
     await engine.subscribe("user_1", "pro_month")
     await engine.apply_payment(
-        Payment(provider="cryptobot", external_id="inv_12345", user_id="user_1", amount=29900)
+        Payment(provider="cryptobot", external_id="inv_12345", user_id="user_1", amount=5_000_000)
     )
     await engine.cancel("user_1")
 
@@ -211,7 +213,7 @@ async def test_the_referral_example_from_the_readme() -> None:
 
     await engine.subscribe("user_1", "pro_month", referrer_id="user_42")
     events = await engine.apply_payment(
-        Payment(provider="cryptobot", external_id="inv_1", user_id="user_1", amount=29900)
+        Payment(provider="cryptobot", external_id="inv_1", user_id="user_1", amount=5_000_000)
     )
 
     assert [event.name for event in events] == [
@@ -219,7 +221,7 @@ async def test_the_referral_example_from_the_readme() -> None:
         "subscription.activated",
         "referral.accrued",
     ]
-    assert await storage.get_balance("user_42") == 8970  # money received, in minor units
+    assert await storage.get_balance("user_42") == 1_500_000  # money received, in minor units
 
 
 async def test_a_trial_that_never_converted_pays_nobody_as_the_readme_says() -> None:
