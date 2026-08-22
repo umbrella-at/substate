@@ -15,12 +15,14 @@ from substate.errors import (
     AlreadySubscribed,
     DuplicatePlan,
     DuplicatePromoCode,
+    DuplicateReferralProgram,
     NotSubscribed,
     PromoAlreadyBound,
     PromoLimitReached,
     SubstateError,
     UnknownPlan,
     UnknownPromoCode,
+    UnknownReferralProgram,
 )
 from substate.events import (
     Event,
@@ -29,6 +31,7 @@ from substate.events import (
     PaymentUnderpaid,
     PaymentUnmatched,
     PromoRedeemed,
+    ReferralAccrued,
     SubscriptionActivated,
     SubscriptionCancelled,
     SubscriptionCreated,
@@ -37,8 +40,18 @@ from substate.events import (
     SubscriptionPlanChanged,
     SubscriptionRenewed,
 )
-from substate.models import Payment, Plan, PromoCode, PromoKind, ScopeKind, State, Subscription
-from substate.money import fixed_discount, percent_discount
+from substate.models import (
+    Accrual,
+    Payment,
+    Plan,
+    PromoCode,
+    PromoKind,
+    ReferralProgram,
+    ScopeKind,
+    State,
+    Subscription,
+)
+from substate.money import fixed_discount, percent_discount, percent_of
 from substate.storage import Storage
 
 # A subscription can cross at most two boundaries (ACTIVE -> GRACE -> EXPIRED).
@@ -48,6 +61,9 @@ MAX_CATCH_UP_TRANSITIONS = 8
 
 # States a new cycle may be started on top of. Everything else is still live.
 _RESTARTABLE = (State.EXPIRED, State.CANCELLED)
+
+# Attribution works without anyone configuring a programme. It just pays nothing.
+_NO_REWARD = ReferralProgram(id="default", percent=0, accrual=Accrual.FIRST_PAYMENT_ONLY)
 
 
 def _periods_of(promo: PromoCode) -> int | None:
@@ -79,12 +95,17 @@ class SubscriptionEngine:
         storage: Storage,
         clock: Clock | None = None,
         on_event: Callable[[Event], None] | None = None,
+        default_program: ReferralProgram | None = None,
     ) -> None:
         self._storage = storage
         self._clock = clock if clock is not None else SystemClock()
         self._on_event = on_event
         self._plans: dict[str, Plan] = {}
         self._promo_codes: dict[str, PromoCode] = {}
+        self._programs: dict[str, ReferralProgram] = {}
+        self._default_program = default_program if default_program is not None else _NO_REWARD
+        if default_program is not None:
+            self.register_referral_program(default_program)
 
     def register_plan(self, plan: Plan) -> None:
         """Add a plan. Ids are claimed once and for all.
@@ -109,6 +130,26 @@ class SubscriptionEngine:
         if promo.code in self._promo_codes:
             raise DuplicatePromoCode(f"a promo code is already registered as {promo.code!r}")
         self._promo_codes[promo.code] = promo
+
+    def register_referral_program(self, program: ReferralProgram) -> None:
+        """Add a referral program. Ids are claimed once, like plans and codes.
+
+        The program passed to the engine as `default_program` is registered
+        here too, so it can be named by `assign_program` like any other.
+        """
+        if program.id in self._programs:
+            raise DuplicateReferralProgram(f"a program is already registered as {program.id!r}")
+        self._programs[program.id] = program
+
+    async def assign_program(self, user_id: str, program_id: str) -> None:
+        """Put a referrer on a program from now on.
+
+        Only future accruals are affected: what has already been paid out is
+        history, and history is not recomputed.
+        """
+        if program_id not in self._programs:
+            raise UnknownReferralProgram(f"no program is registered as {program_id!r}")
+        await self._storage.assign_program(user_id, program_id)
 
     async def subscribe(
         self,
@@ -405,8 +446,50 @@ class SubscriptionEngine:
 
         events.append(self._start_period(subscription, plan, now))
         self._spend_promo_period(subscription)
+        events.extend(await self._accrue(subscription, payment.amount, now))
         await self._storage.save_subscription(subscription)
         return self._returned(events)
+
+    async def _accrue(self, subscription: Subscription, amount: int, now: datetime) -> list[Event]:
+        """Pay the referrer their cut of money that actually arrived. Does not save.
+
+        Only a payment that bought a period gets here, which is what makes a
+        trial nobody converted, and an underpayment, worth nothing to whoever
+        brought the customer in.
+        """
+        referrer_id = subscription.referrer_id
+        if referrer_id is None:
+            return []
+        program = await self._program_for(referrer_id)
+        if program.accrual is Accrual.FIRST_PAYMENT_ONLY and subscription.referral_accrued_at:
+            return []
+
+        earned = percent_of(amount, program.percent)
+        if earned == 0:
+            return []
+        await self._storage.add_accrual(referrer_id, earned)
+        subscription.referral_accrued_at = now
+        return [
+            ReferralAccrued(
+                referrer_id,
+                now,
+                referred_user_id=subscription.user_id,
+                program_id=program.id,
+                amount=earned,
+            )
+        ]
+
+    async def _program_for(self, referrer_id: str) -> ReferralProgram:
+        """The terms this referrer is on right now.
+
+        A program that was assigned and later unregistered falls back to the
+        default rather than failing: a referrer's bookkeeping must not be able
+        to block somebody else's payment.
+        """
+        program_id = await self._storage.get_program_id(referrer_id)
+        if program_id is None:
+            return self._default_program
+        return self._programs.get(program_id, self._default_program)
 
     def _price(self, subscription: Subscription, plan: Plan) -> int:
         """What this payment has to cover: the plan's price, less any bound discount."""
