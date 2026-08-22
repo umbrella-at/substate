@@ -218,6 +218,7 @@ def test_a_subscription_starts_without_referrer_pending_plan_or_promo() -> None:
     assert sub.promo_code is None
     assert sub.promo_periods_left is None
     assert sub.trial_started_at is None
+    assert sub.referral_accrued_at is None
     assert sub.cancelled_at is None
     assert sub.billing_anchor_day is None
 
@@ -239,6 +240,18 @@ def test_a_subscription_remembers_when_its_trial_was_granted() -> None:
 
 def test_a_subscription_starts_with_no_trial_on_record() -> None:
     assert subscription().trial_started_at is None
+
+
+def test_a_subscription_remembers_when_its_referrer_was_first_paid() -> None:
+    """FIRST_PAYMENT_ONLY needs to know a first payment when it sees one."""
+    paid = datetime(2026, 1, 1, tzinfo=UTC)
+    sub = subscription(referrer_id="blogger_1", referral_accrued_at=paid)
+
+    assert sub.referral_accrued_at == paid
+
+
+def test_a_subscription_starts_with_no_accrual_on_record() -> None:
+    assert subscription().referral_accrued_at is None
 
 
 def test_a_subscription_is_a_record_the_engine_moves() -> None:

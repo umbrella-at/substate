@@ -170,7 +170,8 @@ class Subscription:
 
     `trial_started_at` is the same idea applied to the trial: the record
     remembers that it was granted, so a second cycle does not hand out a
-    second free one.
+    second free one. `referral_accrued_at` works the same way for a referrer
+    paid once per person rather than once per cycle.
     """
 
     user_id: str
@@ -182,6 +183,7 @@ class Subscription:
     grace_days: int = 0
     billing_anchor_day: int | None = None
     referrer_id: str | None = None
+    referral_accrued_at: datetime | None = None
     pending_plan_id: str | None = None
     promo_code: str | None = None
     promo_periods_left: int | None = None
