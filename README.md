@@ -187,7 +187,7 @@ engine.register_referral_program(ReferralProgram(
     percent=30,
     accrual=Accrual.EVERY_PAYMENT,
 ))
-engine.assign_program("user_42", "bloggers")
+await engine.assign_program("user_42", "bloggers")
 ```
 
 Attribution is recorded once, at `subscribe()`, and never moves. Accrual is computed

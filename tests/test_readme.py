@@ -5,12 +5,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from substate import (
+    Accrual,
     Event,
     FrozenClock,
     MemoryStorage,
     Payment,
     Period,
     Plan,
+    ReferralProgram,
     State,
     Subscription,
     SubscriptionEngine,
@@ -186,3 +188,61 @@ async def test_the_engine_check_reads_the_state_as_well_as_the_clock() -> None:
     stored = await engine.get_subscription("user_1")
     assert stored is not None and stored.is_active is False
     assert await engine.is_active("user_1") is False
+
+
+async def test_the_referral_example_from_the_readme() -> None:
+    """The whole snippet: register a program, put a referrer on it, watch it pay."""
+    storage = MemoryStorage()
+    engine = SubscriptionEngine(storage=storage, clock=FrozenClock("2026-01-01"))
+    engine.register_plan(PRO_MONTH)
+
+    engine.register_referral_program(
+        ReferralProgram(
+            id="bloggers",
+            percent=30,
+            accrual=Accrual.EVERY_PAYMENT,
+        )
+    )
+    await engine.assign_program("user_42", "bloggers")
+
+    await engine.subscribe("user_1", "pro_month", referrer_id="user_42")
+    events = await engine.apply_payment(
+        Payment(provider="cryptobot", external_id="inv_1", user_id="user_1", amount=29900)
+    )
+
+    assert [event.name for event in events] == [
+        "payment.recorded",
+        "subscription.activated",
+        "referral.accrued",
+    ]
+    assert await storage.get_balance("user_42") == 8970  # money received, in minor units
+
+
+async def test_a_trial_that_never_converted_pays_nobody_as_the_readme_says() -> None:
+    clock = FrozenClock("2026-01-01")
+    storage = MemoryStorage()
+    engine = SubscriptionEngine(storage=storage, clock=clock)
+    engine.register_plan(PRO_MONTH)
+    engine.register_referral_program(
+        ReferralProgram(id="bloggers", percent=30, accrual=Accrual.EVERY_PAYMENT)
+    )
+    await engine.assign_program("user_42", "bloggers")
+    await engine.subscribe("user_1", "pro_month", referrer_id="user_42")
+
+    clock.advance(days=4)
+    await engine.tick()
+
+    assert await storage.get_balance("user_42") == 0
+
+
+async def test_attribution_is_recorded_once_and_never_moves() -> None:
+    clock = FrozenClock("2026-01-01")
+    engine = SubscriptionEngine(storage=MemoryStorage(), clock=clock)
+    engine.register_plan(PRO_MONTH)
+    await engine.subscribe("user_1", "pro_month", referrer_id="user_42")
+    clock.advance(days=4)
+    await engine.tick()
+
+    sub = await engine.subscribe("user_1", "pro_month", referrer_id="someone_else")
+
+    assert sub.referrer_id == "user_42"
