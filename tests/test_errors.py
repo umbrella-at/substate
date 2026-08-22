@@ -6,10 +6,12 @@ import pytest
 
 from substate import (
     AlreadySubscribed,
+    DuplicatePlan,
     InvalidPeriod,
     InvalidPlan,
     InvalidPromoCode,
     InvalidReferralProgram,
+    NotSubscribed,
     SubstateError,
     UnknownPlan,
 )
@@ -21,6 +23,8 @@ EVERY_ERROR = [
     InvalidReferralProgram,
     UnknownPlan,
     AlreadySubscribed,
+    NotSubscribed,
+    DuplicatePlan,
 ]
 
 VALIDATION_ERRORS = [InvalidPlan, InvalidPromoCode, InvalidPeriod, InvalidReferralProgram]
@@ -52,6 +56,8 @@ def test_the_base_error_is_not_a_value_error() -> None:
     assert not issubclass(SubstateError, ValueError)
     assert not issubclass(UnknownPlan, ValueError)
     assert not issubclass(AlreadySubscribed, ValueError)
+    assert not issubclass(NotSubscribed, ValueError)
+    assert not issubclass(DuplicatePlan, ValueError)
 
 
 def test_errors_carry_their_message() -> None:
