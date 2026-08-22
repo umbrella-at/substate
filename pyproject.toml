@@ -25,6 +25,12 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
+# The CryptoBot adapter needs nothing but the standard library: hmac, hashlib,
+# json and decimal. The extra exists so that installing it reads the same as
+# every other adapter will, and so the name is reserved before one of them
+# needs a dependency.
+cryptobot = []
+
 # Upper bounds on purpose: a new ruff or mypy release must not turn CI red
 # on a repository nobody touched. Bump these deliberately.
 dev = [
@@ -63,7 +69,7 @@ select = [
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "examples"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

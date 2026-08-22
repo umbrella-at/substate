@@ -7,7 +7,7 @@ Subscription lifecycle for Python: trials, renewals, grace periods, promo codes 
 
 <!-- PyPI badges go back in with the v0.1.0 release -->
 
-<!-- TODO before release: asciinema cast of the test suite fast-forwarding a year of subscriptions in ~200ms -->
+![The test suite: 774 tests, 99% coverage, 1.6 seconds](docs/test-run.svg)
 
 ## Why
 
@@ -31,15 +31,17 @@ Zero required dependencies. Payment and storage adapters are optional extras.
 
 ```python
 import asyncio
-from substate import SubscriptionEngine, MemoryStorage, Plan, Payment, Period
+from substate import SubscriptionEngine, MemoryStorage, FrozenClock, Plan, Payment, Period
 
 async def main():
-    engine = SubscriptionEngine(storage=MemoryStorage())
+    clock = FrozenClock("2026-01-01")   # the real clock in production;
+                                        # frozen here so the output is exact
+    engine = SubscriptionEngine(storage=MemoryStorage(), clock=clock)
 
     engine.register_plan(Plan(
         id="pro_month",
-        price=29900,              # minor units, always integers
-        currency="RUB",
+        price=5_000_000,          # 5.00 USDT, minor units
+        currency="USDT",
         period=Period.days(30),
         trial_days=3,
     ))
@@ -51,7 +53,7 @@ async def main():
         provider="cryptobot",
         external_id="inv_12345",          # calling this twice changes nothing
         user_id="user_1",
-        amount=29900,
+        amount=5_000_000,
     ))
 
     sub = await engine.get_subscription("user_1")
@@ -171,7 +173,35 @@ see boundaries the call caught up on.
 
 ## Money
 
-Integers in minor units (kopecks, cents), everywhere, including discount math. No floats, no `Decimal` surprises. Rounding is explicit and covered by a test.
+Integers in minor units, everywhere, including discount math. No floats, no `Decimal` surprises. Rounding is explicit and covered by a test.
+
+A plan is priced in the unit its provider actually pays in — USDT through CryptoBot, XTR through Stars — and nothing is ever converted. `Plan.currency` is a label the core does not interpret, the scale behind it belongs to the adapter, and a second provider means a second plan rather than an exchange rate.
+
+## Promo codes
+
+Three kinds. `PERCENT` and `FIXED` attach to the subscription and come off the
+payments that follow; `PLUS_DAYS` is spent the moment it is claimed and moves
+whichever boundary the subscription is running on.
+
+```python
+engine.register_promo_code(PromoCode(
+    code="SORRY",
+    kind=PromoKind.PLUS_DAYS,
+    value=3,
+))
+
+# the service was down for a day: give everyone their three days back
+for user_id in affected:
+    await engine.redeem(user_id, "SORRY")
+```
+
+That is what `redeem()` exists for. Without it there is no way to extend a
+subscription that is already running, which is the one thing you need at the
+moment you least want to be writing code.
+
+Limits (`max_redemptions`, `max_per_user`) count redemptions rather than
+payments, and they are checked atomically: somebody who claims a code and never
+pays has still spent their slot.
 
 ## Referrals come with programs
 
@@ -214,6 +244,29 @@ Storage, behind one protocol:
 
 Both are plain protocols. Writing your own is roughly forty lines.
 
+## Taking money
+
+An adapter turns a signed webhook into a payment. It creates no invoices and
+opens no sockets:
+
+```python
+from substate.adapters.cryptobot import CryptoBotWebhook
+
+webhook = CryptoBotWebhook(token=CRYPTO_PAY_TOKEN)
+
+parsed = webhook.parse(body, signature)      # raw request bytes, header value
+events = await engine.apply_payment(parsed.payment)
+```
+
+`body` must be the bytes the socket delivered: the signature covers those, and a
+framework that parses the JSON and serialises it again will break the check.
+Amounts are read into minor units with `Decimal`, never `float`, and the invoice
+must carry the subscriber's id in its `payload`.
+
+Answer an `AdapterError` with 400 and do not retry it — a body that will never
+verify will never verify — and keep 500 for your own failures, which are worth
+retrying.
+
 ## What substate does not do
 
 Deliberately, so the scope stays small enough to finish:
@@ -223,6 +276,9 @@ Deliberately, so the scope stays small enough to finish:
 - **No framework coupling.** No aiogram, no FastAPI, no Django. Bring your own.
 - **No background scheduler.** You call `tick()` from your own cron, worker or startup hook.
 - **No proration.** A plan change takes effect at the end of the paid period, and moves no money. Prorated switching is v0.2.
+- **No currency reconciliation.** A plan is denominated in one unit, the payment arrives in that
+  same unit, and nothing checks one against the other because there is nothing to check. Taking a
+  second provider means registering a second plan.
 - **No refunds or chargebacks.**
 - **No invoicing, receipts, tax or accounting.**
 

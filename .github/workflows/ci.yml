@@ -57,3 +57,6 @@ jobs:
 
       - name: Pytest
         run: pytest --cov --cov-report=term-missing
+
+      - name: Example
+        run: python examples/lifecycle.py

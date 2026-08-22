@@ -6,6 +6,7 @@ The public API is intentionally small. See README.md for the shape it will take.
 from substate.clock import Clock, FrozenClock, SystemClock
 from substate.engine import SubscriptionEngine
 from substate.errors import (
+    AdapterError,
     AlreadySubscribed,
     DuplicatePlan,
     DuplicatePromoCode,
@@ -14,6 +15,8 @@ from substate.errors import (
     InvalidPlan,
     InvalidPromoCode,
     InvalidReferralProgram,
+    InvalidSignature,
+    InvalidWebhook,
     NotSubscribed,
     PromoAlreadyBound,
     PromoLimitReached,
@@ -21,6 +24,7 @@ from substate.errors import (
     UnknownPlan,
     UnknownPromoCode,
     UnknownReferralProgram,
+    UnsupportedAsset,
 )
 from substate.events import (
     Event,
@@ -52,11 +56,13 @@ from substate.models import (
     Subscription,
 )
 from substate.money import Discount, fixed_discount, percent_discount, percent_of
+from substate.payments import ParsedPayment, PaymentWebhook
 from substate.periods import Period, PeriodUnit
 from substate.storage import MemoryStorage, Storage
 
 __all__ = [
     "Accrual",
+    "AdapterError",
     "AlreadySubscribed",
     "Clock",
     "Discount",
@@ -70,13 +76,17 @@ __all__ = [
     "InvalidPlan",
     "InvalidPromoCode",
     "InvalidReferralProgram",
+    "InvalidSignature",
+    "InvalidWebhook",
     "MemoryStorage",
     "NotSubscribed",
+    "ParsedPayment",
     "Payment",
     "PaymentDuplicate",
     "PaymentRecorded",
     "PaymentUnderpaid",
     "PaymentUnmatched",
+    "PaymentWebhook",
     "Period",
     "PeriodUnit",
     "Plan",
@@ -105,6 +115,7 @@ __all__ = [
     "UnknownPlan",
     "UnknownPromoCode",
     "UnknownReferralProgram",
+    "UnsupportedAsset",
     "__version__",
     "fixed_discount",
     "percent_discount",

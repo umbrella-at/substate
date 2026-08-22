@@ -174,7 +174,10 @@ class SubscriptionEngine:
         no subscription is created: the caller can offer another code instead
         of finding themselves already subscribed.
 
-        `referrer_id` is written when the record is created and never again.
+        `referrer_id` is written when the record is created and never again,
+        and a user handed their own id is recorded as nobody's referral: a
+        cashback loop is not a referral, however it arrived.
+
         A later cycle ignores the argument in silence rather than raising:
         applications read the referrer off a link on every call, and a legal
         path must not force a `try/except`. It also means a partner who hands
@@ -201,7 +204,7 @@ class SubscriptionEngine:
                 user_id=user_id,
                 plan_id=plan_id,
                 state=State.EXPIRED,
-                referrer_id=referrer_id,
+                referrer_id=None if referrer_id == user_id else referrer_id,
             )
         self._begin_cycle(subscription, plan, now)
 
