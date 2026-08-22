@@ -1,7 +1,7 @@
 """The state machine itself.
 
-Nothing here happens on its own. Five calls and a clock move a subscription:
-`subscribe`, `apply_payment`, `cancel`, `change_plan` and `tick`.
+Nothing here happens on its own. Six calls and a clock move a subscription:
+`subscribe`, `apply_payment`, `redeem`, `cancel`, `change_plan` and `tick`.
 """
 
 from __future__ import annotations

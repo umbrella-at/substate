@@ -181,6 +181,7 @@ async def test_free_days_on_a_plan_without_a_trial_start_a_trial() -> None:
     assert sub.state is State.TRIAL
     assert sub.trial_ends_at == utc(2026, 1, 8)
     assert sub.trial_started_at == utc(2026, 1, 1)
+    assert sub.expires_at is None  # the boundary of a cycle nobody paid for
     assert await engine.is_active("user_1") is True
     assert names(sink) == ["subscription.created", "promo.redeemed"]
 
@@ -570,3 +571,24 @@ async def test_free_days_can_be_redeemed_twice() -> None:
 
     assert sub.trial_ends_at == utc(2026, 1, 18)  # three trial days plus seven plus seven
     assert sub.promo_code is None
+
+
+async def test_cancelling_gifted_days_serves_them_out() -> None:
+    """The gift becomes the access boundary, so cancelling cannot take it back.
+
+    That only works because the old paid boundary was cleared when the days
+    were granted: cancel writes the trial boundary into `expires_at` only when
+    there is none, and a stale one from the dead cycle would end access at once.
+    """
+    clock = FrozenClock(START)
+    engine = world(clock, promo("FREEWEEK", kind=PromoKind.PLUS_DAYS, value=7))
+    await engine.subscribe("user_1", "lite", promo="FREEWEEK")
+
+    sub = await engine.cancel("user_1")
+
+    assert sub.state is State.CANCELLED
+    assert sub.access_until == utc(2026, 1, 8)
+    assert await engine.is_active("user_1") is True
+
+    clock.advance(days=8)
+    assert names(await engine.tick()) == ["subscription.expired"]

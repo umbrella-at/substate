@@ -257,6 +257,9 @@ async def test_the_built_in_default_pays_nothing_and_says_nothing() -> None:
     assert names(events) == ["payment.recorded", "subscription.activated"]
     assert await storage.get_balance("stranger") == 0
 
+    unstamped = await engine.get_subscription("user_1")
+    assert unstamped is not None and unstamped.referral_accrued_at is None
+
 
 async def test_a_program_change_leaves_what_was_already_earned_alone() -> None:
     clock = FrozenClock(START)
@@ -377,3 +380,30 @@ async def test_a_program_that_is_no_longer_registered_falls_back_to_the_default(
 
     assert names(events) == ["payment.recorded", "subscription.activated", "referral.accrued"]
     assert await storage.get_balance("blogger_1") == 2990  # the default's ten percent
+
+
+async def test_a_payment_worth_nothing_to_the_referrer_does_not_retire_them() -> None:
+    """A zero accrual stamps nothing, or the first free payment would end the referral.
+
+    FIRST_PAYMENT_ONLY reads the stamp as "already paid". Setting it for an
+    accrual of zero would mean a referrer whose program was configured a day
+    late never earns anything at all.
+    """
+    clock = FrozenClock(START)
+    storage = MemoryStorage()
+    engine = world(clock, FRIENDS, storage=storage)  # friend_1 is on no program yet
+    await engine.subscribe("user_1", "pro", referrer_id="friend_1")
+
+    events = await engine.apply_payment(payment())
+
+    assert names(events) == ["payment.recorded", "subscription.activated"]
+    unstamped = await engine.get_subscription("user_1")
+    assert unstamped is not None and unstamped.referral_accrued_at is None
+
+    await engine.assign_program("friend_1", "friends")
+    later = await engine.apply_payment(payment(external_id="inv_2"))
+
+    assert names(later) == ["payment.recorded", "subscription.renewed", "referral.accrued"]
+    assert await storage.get_balance("friend_1") == 2990
+    stamped = await engine.get_subscription("user_1")
+    assert stamped is not None and stamped.referral_accrued_at == utc(2026, 1, 1)
