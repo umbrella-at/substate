@@ -445,3 +445,19 @@ async def test_a_cancelled_record_cannot_be_attributed_either() -> None:
     sub = await engine.subscribe("user_1", "pro", referrer_id="partner")
 
     assert sub.referrer_id is None
+
+
+async def test_a_user_cannot_refer_themselves() -> None:
+    """A cashback loop dressed as a referral. Dropped in silence, like a late referrer."""
+    clock = FrozenClock(START)
+    storage = MemoryStorage()
+    sink: list[Event] = []
+    engine = world(clock, default=BLOGGERS, storage=storage, sink=sink)
+
+    sub = await engine.subscribe("user_1", "pro", referrer_id="user_1")
+    sink.clear()
+    events = await engine.apply_payment(payment())
+
+    assert sub.referrer_id is None
+    assert names(events) == ["payment.recorded", "subscription.activated"]
+    assert await storage.get_balance("user_1") == 0
