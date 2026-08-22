@@ -75,3 +75,24 @@ class DuplicateReferralProgram(SubstateError):
 
 class UnknownReferralProgram(SubstateError):
     """No referral program is registered under this id."""
+
+
+class AdapterError(SubstateError):
+    """A provider's webhook could not be turned into a payment.
+
+    Its own branch of the tree on purpose: a malformed or forged webhook is
+    answered with 400 and never retried, while a domain error means the
+    request was fine and something else went wrong. Two answers, two branches.
+    """
+
+
+class InvalidSignature(AdapterError):
+    """The signature does not match the body under the configured secret."""
+
+
+class InvalidWebhook(AdapterError):
+    """The body is signed but not something this adapter can read."""
+
+
+class UnsupportedAsset(AdapterError):
+    """The payment arrived in an asset this adapter has no scale for."""
