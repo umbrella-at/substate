@@ -174,11 +174,18 @@ class SubscriptionEngine:
         no subscription is created: the caller can offer another code instead
         of finding themselves already subscribed.
 
-        `referrer_id` is recorded once, on the first subscription, and never
-        moves again. It needs no referral program set up: without one the
-        attribution is still written down and the accrual is simply zero.
-        Recording who brought a user in and deciding what to pay for it are
-        different jobs, and the second is not a condition of the first.
+        `referrer_id` is written when the record is created and never again.
+        A later cycle ignores the argument in silence rather than raising:
+        applications read the referrer off a link on every call, and a legal
+        path must not force a `try/except`. It also means a partner who hands
+        a link to somebody the product already had earns nothing, which is the
+        safer way round: an underpaid partner is an argument, an overpaid one
+        is money that has left.
+
+        It needs no referral program set up: without one the attribution is
+        still written down and the accrual is simply zero. Recording who
+        brought a user in and deciding what to pay for it are different jobs,
+        and the second is not a condition of the first.
         """
         plan = self._plan(plan_id)
         promo_code = None if promo is None else self._promo_code(promo)
@@ -190,10 +197,13 @@ class SubscriptionEngine:
             raise AlreadySubscribed(f"{user_id!r} already has a live subscription")
 
         if subscription is None:
-            subscription = Subscription(user_id=user_id, plan_id=plan_id, state=State.EXPIRED)
+            subscription = Subscription(
+                user_id=user_id,
+                plan_id=plan_id,
+                state=State.EXPIRED,
+                referrer_id=referrer_id,
+            )
         self._begin_cycle(subscription, plan, now)
-        if subscription.referrer_id is None:
-            subscription.referrer_id = referrer_id
 
         claimed: list[Event] = []
         if promo_code is not None:

@@ -407,3 +407,41 @@ async def test_a_payment_worth_nothing_to_the_referrer_does_not_retire_them() ->
     assert await storage.get_balance("friend_1") == 2990
     stamped = await engine.get_subscription("user_1")
     assert stamped is not None and stamped.referral_accrued_at == utc(2026, 1, 1)
+
+
+async def test_a_later_cycle_cannot_attach_a_referrer_to_an_organic_customer() -> None:
+    """A partner who handed a link to a customer the product already had earns nothing.
+
+    The failure modes are not symmetric: an underpaid partner is an argument,
+    an overpaid one is money that has left. The rule can be loosened in v0.2;
+    it cannot be tightened once anyone is being paid under it.
+    """
+    clock = FrozenClock(START)
+    storage = MemoryStorage()
+    sink: list[Event] = []
+    engine = world(clock, BLOGGERS, storage=storage, sink=sink)
+    await engine.assign_program("partner", "bloggers")
+    await engine.subscribe("user_1", "pro")  # arrived on their own
+    await engine.apply_payment(payment())
+    clock.advance(days=40)
+    await engine.tick()
+
+    sub = await engine.subscribe("user_1", "pro", referrer_id="partner")
+    sink.clear()
+    events = await engine.apply_payment(payment(external_id="inv_2"))
+
+    assert sub.referrer_id is None
+    assert names(events) == ["payment.recorded", "subscription.activated"]
+    assert await storage.get_balance("partner") == 0
+
+
+async def test_a_cancelled_record_cannot_be_attributed_either() -> None:
+    clock = FrozenClock(START)
+    engine = world(clock, BLOGGERS)
+    await engine.subscribe("user_1", "pro")
+    await engine.apply_payment(payment())
+    await engine.cancel("user_1")
+
+    sub = await engine.subscribe("user_1", "pro", referrer_id="partner")
+
+    assert sub.referrer_id is None
