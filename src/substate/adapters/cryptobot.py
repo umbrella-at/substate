@@ -28,7 +28,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, DecimalException, Inexact, Rounded, localcontext
 from typing import Any
 
 from substate.errors import InvalidSignature, InvalidWebhook, UnsupportedAsset
@@ -43,6 +43,15 @@ SUPPORTED_ASSET = "USDT"
 
 #: The header Crypto Pay puts the signature in.
 SIGNATURE_HEADER = "crypto-pay-api-signature"
+
+#: Length of a hex SHA-256 digest, which is what that header carries.
+SIGNATURE_LENGTH = 64
+
+_HEX = frozenset("0123456789abcdef")
+
+#: Significant digits the amount is read with. Far past any real invoice, and
+#: fixed here so the application's own decimal settings cannot reach the money.
+AMOUNT_PRECISION = 40
 
 #: The update this adapter reads. Anything else is not a payment.
 PAID_UPDATE = "invoice_paid"
@@ -72,6 +81,10 @@ class CryptoBotWebhook:
     __slots__ = ("_secret",)
 
     def __init__(self, token: str) -> None:
+        if not token.strip():
+            # sha256 of an empty token is a constant anyone can compute, and
+            # every forged signature would verify against it.
+            raise ValueError("a Crypto Pay app token is required")
         self._secret = hashlib.sha256(token.encode()).digest()
 
     def parse(self, body: bytes, signature: str) -> ParsedPayment:
@@ -94,13 +107,18 @@ class CryptoBotWebhook:
         return ParsedPayment(payment=payment, currency=asset)
 
     def _verify(self, body: bytes, signature: str) -> None:
-        # A request that arrived without the header reaches here as None: that
-        # is a refusal like any other, not an AttributeError two frames down.
-        if not isinstance(signature, str):
-            raise InvalidSignature(f"the signature is not a string: {type(signature).__name__}")
+        # Header values are attacker-controlled, and a request that arrived
+        # without the header at all reaches here as None. Anything that cannot
+        # be a digest is refused before the comparison: compare_digest raises
+        # TypeError on strings outside ASCII, which would leave this adapter's
+        # error branch and turn a 400 into a 500.
+        candidate = signature.strip().lower() if isinstance(signature, str) else ""
+        if len(candidate) != SIGNATURE_LENGTH or not _HEX.issuperset(candidate):
+            raise InvalidSignature("the signature is not a hex digest")
+
         # Hex case carries no information and the header's is not guaranteed.
         expected = hmac.new(self._secret, body, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, signature.strip().lower()):
+        if not hmac.compare_digest(expected, candidate):
             raise InvalidSignature("the signature does not match the body")
 
 
@@ -171,10 +189,18 @@ def _minor_units(amount: Any) -> int:
     """Decimal USDT to whole minor units, exactly or not at all."""
     if isinstance(amount, bool) or not isinstance(amount, str | int | Decimal):
         raise InvalidWebhook(f"the amount is not a number: {amount!r}")
-    try:
-        scaled = Decimal(amount) * USDT_MINOR_UNITS
-    except InvalidOperation as broken:
-        raise InvalidWebhook(f"the amount is not a number: {amount!r}") from broken
+    # Its own context, not the application's: a project that lowered decimal's
+    # precision for its own arithmetic used to round the payment on the way in,
+    # and 1234.567891 USDT became 1234.570000. Rounding is trapped rather than
+    # allowed, so an amount too long to hold is refused instead of rewritten.
+    with localcontext() as context:
+        context.prec = AMOUNT_PRECISION
+        context.traps[Inexact] = True
+        context.traps[Rounded] = True
+        try:
+            scaled = Decimal(amount) * USDT_MINOR_UNITS
+        except DecimalException as broken:
+            raise InvalidWebhook(f"the amount is not a usable number: {amount!r}") from broken
 
     # Decimal reads "NaN" and "Infinity" without complaint; int() then raises
     # something no caller of an adapter would think to catch.

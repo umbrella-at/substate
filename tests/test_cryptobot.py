@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+from decimal import localcontext
 from typing import Any
 
 import pytest
@@ -369,3 +370,50 @@ def test_an_invoice_naming_no_unit_at_all_is_refused() -> None:
 
     with pytest.raises(InvalidWebhook):
         parse(raw)
+
+
+@pytest.mark.parametrize(
+    "signature",
+    ["é" * 64, "\u0410" * 64, "ff" * 31, "zz" * 32, "0" * 63, "0" * 65, "0" * 64 + " "],
+)
+def test_a_signature_that_cannot_be_a_digest_is_refused(signature: str) -> None:
+    """Header values are attacker-controlled: a non-ASCII one must refuse, not crash.
+
+    `hmac.compare_digest` raises TypeError on strings outside ASCII, which
+    would leave the adapter's error branch entirely and answer 500 to a request
+    that deserves 400.
+    """
+    with pytest.raises(InvalidSignature):
+        parse(body(), signature)
+
+
+@pytest.mark.parametrize("amount", ["1E999999", "-1E999999999", "9" * 5000, "1." + "0" * 5000])
+def test_an_absurd_amount_is_refused_rather_than_raised_over(amount: str) -> None:
+    """decimal traps Overflow, and Overflow is not an InvalidOperation."""
+    with pytest.raises(InvalidWebhook):
+        parse(body(amount=amount))
+
+
+def test_the_callers_decimal_precision_cannot_reach_the_amount() -> None:
+    """The worst kind of bug this adapter could have: right shape, wrong money.
+
+    An application that lowered decimal's precision for its own arithmetic used
+    to round the payment: 1234.567891 USDT arrived as 1234.570000.
+    """
+    with localcontext() as context:
+        context.prec = 6
+
+        assert parse(body(amount="1234.567891")).payment.amount == 1_234_567_891
+
+
+def test_a_large_but_real_amount_still_reads() -> None:
+    assert parse(body(amount="999999999.999999")).payment.amount == 999_999_999_999_999
+
+
+@pytest.mark.parametrize("token", ["", "   ", "\n"])
+def test_an_empty_token_is_refused_at_construction(token: str) -> None:
+    """sha256 of an empty token is a constant anyone can compute, and every
+    forged signature would verify against it. Fail at startup, not at the first
+    payment."""
+    with pytest.raises(ValueError):
+        CryptoBotWebhook(token)
