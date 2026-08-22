@@ -13,6 +13,7 @@ from substate import (
     MemoryStorage,
     NotSubscribed,
     Payment,
+    PaymentUnderpaid,
     Period,
     Plan,
     PromoAlreadyBound,
@@ -398,3 +399,132 @@ async def test_a_promo_does_not_survive_the_cycle_it_was_claimed_in() -> None:
 
     assert sub.promo_code is None
     assert sub.promo_periods_left is None
+
+
+async def test_a_percent_code_lowers_what_the_payment_must_cover() -> None:
+    clock = FrozenClock(START)
+    engine = world(clock, promo())  # 30% off 29900
+    await engine.subscribe("user_1", "pro", promo="SUMMER")
+
+    events = await engine.apply_payment(payment(amount=20930))
+
+    assert names(events) == ["payment.recorded", "subscription.activated"]
+
+
+async def test_a_kopeck_short_of_the_discounted_price_is_still_an_underpayment() -> None:
+    clock = FrozenClock(START)
+    engine = world(clock, promo())
+    await engine.subscribe("user_1", "pro", promo="SUMMER")
+
+    events = await engine.apply_payment(payment(amount=20929))
+
+    assert names(events) == ["payment.recorded", "payment.underpaid"]
+    underpaid = events[1]
+    assert isinstance(underpaid, PaymentUnderpaid)
+    assert underpaid.expected == 20930  # 29900 less 30 percent, rounded the seller's way
+
+
+async def test_a_fixed_code_takes_its_amount_off() -> None:
+    clock = FrozenClock(START)
+    engine = world(clock, promo(kind=PromoKind.FIXED, value=5000))
+    await engine.subscribe("user_1", "pro", promo="SUMMER")
+
+    events = await engine.apply_payment(payment(amount=24900))
+
+    assert names(events) == ["payment.recorded", "subscription.activated"]
+
+
+async def test_a_fixed_code_larger_than_the_price_makes_the_period_free() -> None:
+    """The code was written before it met this price. It caps, it never owes."""
+    clock = FrozenClock(START)
+    engine = world(clock, promo(kind=PromoKind.FIXED, value=1_000_000))
+    await engine.subscribe("user_1", "pro", promo="SUMMER")
+
+    events = await engine.apply_payment(payment(amount=0))
+
+    assert names(events) == ["payment.recorded", "subscription.activated"]
+    sub = await engine.get_subscription("user_1")
+    assert sub is not None and sub.state is State.ACTIVE
+
+
+async def test_the_discount_applies_to_the_plan_that_is_coming() -> None:
+    """The price to beat is the pending plan's, and the code comes off that."""
+    clock = FrozenClock(START)
+    engine = world(clock, promo(applies_to=PromoScope.forever()))
+    engine.register_plan(plan("annual", price=99900, period=Period.days(365), trial_days=0))
+    await engine.subscribe("user_1", "pro", promo="SUMMER")
+    await engine.apply_payment(payment(amount=20930))
+    await engine.change_plan("user_1", "annual")
+
+    events = await engine.apply_payment(payment(external_id="inv_2", amount=69930))
+
+    assert names(events) == ["payment.recorded", "subscription.renewed"]
+
+
+async def test_a_first_payment_code_is_spent_after_one_period() -> None:
+    clock = FrozenClock(START)
+    engine = world(clock, promo())
+    await engine.subscribe("user_1", "pro", promo="SUMMER")
+    await engine.apply_payment(payment(amount=20930))
+
+    sub = await engine.get_subscription("user_1")
+    assert sub is not None
+    assert sub.promo_code is None
+    assert sub.promo_periods_left is None
+
+    events = await engine.apply_payment(payment(external_id="inv_2", amount=20930))
+    assert names(events) == ["payment.recorded", "payment.underpaid"]
+
+
+async def test_n_periods_counts_down_one_payment_at_a_time() -> None:
+    clock = FrozenClock(START)
+    engine = world(clock, promo(applies_to=PromoScope.n_periods(2)))
+    await engine.subscribe("user_1", "pro", promo="SUMMER")
+
+    await engine.apply_payment(payment(amount=20930))
+    first = await engine.get_subscription("user_1")
+    await engine.apply_payment(payment(external_id="inv_2", amount=20930))
+    second = await engine.get_subscription("user_1")
+
+    assert first is not None and first.promo_periods_left == 1
+    assert second is not None and second.promo_code is None
+
+    events = await engine.apply_payment(payment(external_id="inv_3", amount=20930))
+    assert names(events) == ["payment.recorded", "payment.underpaid"]
+
+
+async def test_forever_keeps_discounting_for_as_long_as_the_cycle_lasts() -> None:
+    clock = FrozenClock(START)
+    engine = world(clock, promo(applies_to=PromoScope.forever()))
+    await engine.subscribe("user_1", "pro", promo="SUMMER")
+
+    for number in range(1, 4):
+        events = await engine.apply_payment(payment(external_id=f"inv_{number}", amount=20930))
+        assert names(events)[1] in {"subscription.activated", "subscription.renewed"}
+
+    sub = await engine.get_subscription("user_1")
+    assert sub is not None and sub.promo_code == "SUMMER"
+
+
+async def test_an_underpayment_does_not_spend_a_promo_period() -> None:
+    """A period the customer never got cannot be taken off their code."""
+    clock = FrozenClock(START)
+    engine = world(clock, promo(applies_to=PromoScope.n_periods(2)))
+    await engine.subscribe("user_1", "pro", promo="SUMMER")
+
+    await engine.apply_payment(payment(amount=100))
+
+    sub = await engine.get_subscription("user_1")
+    assert sub is not None and sub.promo_periods_left == 2
+
+
+async def test_a_duplicate_payment_does_not_spend_a_promo_period() -> None:
+    clock = FrozenClock(START)
+    engine = world(clock, promo(applies_to=PromoScope.n_periods(2)))
+    await engine.subscribe("user_1", "pro", promo="SUMMER")
+    await engine.apply_payment(payment(amount=20930))
+
+    await engine.apply_payment(payment(amount=20930))
+
+    sub = await engine.get_subscription("user_1")
+    assert sub is not None and sub.promo_periods_left == 1

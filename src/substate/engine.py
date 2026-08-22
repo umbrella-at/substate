@@ -38,6 +38,7 @@ from substate.events import (
     SubscriptionRenewed,
 )
 from substate.models import Payment, Plan, PromoCode, PromoKind, ScopeKind, State, Subscription
+from substate.money import fixed_discount, percent_discount
 from substate.storage import Storage
 
 # A subscription can cross at most two boundaries (ACTIVE -> GRACE -> EXPIRED).
@@ -388,7 +389,8 @@ class SubscriptionEngine:
             return self._returned(events)
 
         plan = self._plan(subscription.pending_plan_id or subscription.plan_id)
-        if payment.amount < plan.price:
+        price = self._price(subscription, plan)
+        if payment.amount < price:
             events.append(
                 PaymentUnderpaid(
                     payment.user_id,
@@ -396,14 +398,40 @@ class SubscriptionEngine:
                     provider=payment.provider,
                     external_id=payment.external_id,
                     amount=payment.amount,
-                    expected=plan.price,
+                    expected=price,
                 )
             )
             return self._returned(events)
 
         events.append(self._start_period(subscription, plan, now))
+        self._spend_promo_period(subscription)
         await self._storage.save_subscription(subscription)
         return self._returned(events)
+
+    def _price(self, subscription: Subscription, plan: Plan) -> int:
+        """What this payment has to cover: the plan's price, less any bound discount."""
+        if subscription.promo_code is None:
+            return plan.price
+        promo = self._promo_code(subscription.promo_code)
+        if promo.kind is PromoKind.PERCENT:
+            return percent_discount(plan.price, promo.value).final
+        return fixed_discount(plan.price, promo.value).final
+
+    def _spend_promo_period(self, subscription: Subscription) -> None:
+        """Take one period off a bound discount, and drop it when it runs out.
+
+        Only a payment that actually bought a period gets here: an
+        underpayment is measured against the discount but takes nothing off a
+        code the customer got nothing for.
+        """
+        left = subscription.promo_periods_left
+        if subscription.promo_code is None or left is None:
+            return
+        if left > 1:
+            subscription.promo_periods_left = left - 1
+            return
+        subscription.promo_code = None
+        subscription.promo_periods_left = None
 
     def _start_period(self, subscription: Subscription, plan: Plan, now: datetime) -> Event:
         """Move a paid-for subscription into its next period. Does not save.
