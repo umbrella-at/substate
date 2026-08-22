@@ -555,3 +555,18 @@ async def test_a_bound_code_missing_from_the_registry_stops_the_payment_before_i
     events = await repaired.apply_payment(renewal)
 
     assert names(events) == ["payment.recorded", "subscription.renewed"]
+
+
+async def test_free_days_can_be_redeemed_twice() -> None:
+    """PLUS_DAYS binds nothing, so there is nothing for a second one to collide with."""
+    clock = FrozenClock(START)
+    engine = world(
+        clock,
+        promo("FREEWEEK", kind=PromoKind.PLUS_DAYS, value=7, max_per_user=2),
+    )
+    await engine.subscribe("user_1", "pro", promo="FREEWEEK")
+
+    sub = await engine.redeem("user_1", "FREEWEEK")
+
+    assert sub.trial_ends_at == utc(2026, 1, 18)  # three trial days plus seven plus seven
+    assert sub.promo_code is None

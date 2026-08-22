@@ -362,3 +362,18 @@ async def test_a_referrer_earns_nothing_from_a_payment_that_bought_nothing() -> 
     await engine.apply_payment(payment())  # the same webhook again
 
     assert await storage.get_balance("blogger_1") == 8970
+
+
+async def test_a_program_that_is_no_longer_registered_falls_back_to_the_default() -> None:
+    """A referrer's bookkeeping must not be able to block somebody else's payment."""
+    clock = FrozenClock(START)
+    storage = MemoryStorage()
+    engine = world(clock, BLOGGERS, default=FRIENDS, storage=storage)
+    await engine.assign_program("blogger_1", "bloggers")
+    await engine.subscribe("user_1", "pro", referrer_id="blogger_1")
+
+    restarted = world(clock, default=FRIENDS, storage=storage)  # bloggers is gone
+    events = await restarted.apply_payment(payment())
+
+    assert names(events) == ["payment.recorded", "subscription.activated", "referral.accrued"]
+    assert await storage.get_balance("blogger_1") == 2990  # the default's ten percent
