@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import ClassVar, Literal
 
-from substate.models import State
+from substate.models import PromoKind, State
 
 ExpiryReason = Literal[
     "trial_not_converted",  # a trial nobody paid for
@@ -139,4 +139,29 @@ class PaymentUnmatched(Event):
 
     provider: str
     external_id: str
+    amount: int
+
+
+@dataclass(frozen=True)
+class PromoRedeemed(Event):
+    """A promo code was claimed by this user and has been applied."""
+
+    name: ClassVar[str] = "promo.redeemed"
+
+    code: str
+    kind: PromoKind
+
+
+@dataclass(frozen=True)
+class ReferralAccrued(Event):
+    """A referrer earned their cut of a payment.
+
+    `user_id` is the referrer, the one whose balance grew; the person who paid
+    is `referred_user_id`.
+    """
+
+    name: ClassVar[str] = "referral.accrued"
+
+    referred_user_id: str
+    program_id: str
     amount: int

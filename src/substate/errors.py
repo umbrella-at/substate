@@ -47,3 +47,31 @@ class AlreadySubscribed(SubstateError):
 
 class NotSubscribed(SubstateError):
     """The user has no subscription at all, so there is nothing to act on."""
+
+
+class DuplicatePromoCode(SubstateError):
+    """A promo code is already registered under this code."""
+
+
+class UnknownPromoCode(SubstateError):
+    """No promo code is registered under this code."""
+
+
+class PromoLimitReached(SubstateError):
+    """The code is real, but its redemptions are used up."""
+
+
+class PromoAlreadyBound(SubstateError):
+    """A discount is already attached to this subscription.
+
+    Two discounts on one payment have no defined winner, so the second one is
+    refused rather than silently overwriting the first.
+    """
+
+
+class DuplicateReferralProgram(SubstateError):
+    """A referral program is already registered under this id."""
+
+
+class UnknownReferralProgram(SubstateError):
+    """No referral program is registered under this id."""

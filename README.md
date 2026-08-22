@@ -111,8 +111,9 @@ subscription renewed from a two-month-old date would land entirely in the past.
 
 `CANCELLED` is reachable from any state and keeps access until `expires_at`.
 
-Transitions are driven by four calls and the clock: `subscribe()`, `apply_payment()`,
-`change_plan()`, `cancel()` and `tick()`. Nothing changes state behind your back.
+Transitions are driven by six calls and the clock: `subscribe()`, `apply_payment()`,
+`redeem()`, `change_plan()`, `cancel()` and `tick()`. Nothing changes state behind your
+back.
 
 ## Checking access
 
@@ -187,7 +188,7 @@ engine.register_referral_program(ReferralProgram(
     percent=30,
     accrual=Accrual.EVERY_PAYMENT,
 ))
-engine.assign_program("user_42", "bloggers")
+await engine.assign_program("user_42", "bloggers")
 ```
 
 Attribution is recorded once, at `subscribe()`, and never moves. Accrual is computed

@@ -7,13 +7,19 @@ import pytest
 from substate import (
     AlreadySubscribed,
     DuplicatePlan,
+    DuplicatePromoCode,
+    DuplicateReferralProgram,
     InvalidPeriod,
     InvalidPlan,
     InvalidPromoCode,
     InvalidReferralProgram,
     NotSubscribed,
+    PromoAlreadyBound,
+    PromoLimitReached,
     SubstateError,
     UnknownPlan,
+    UnknownPromoCode,
+    UnknownReferralProgram,
 )
 
 EVERY_ERROR = [
@@ -25,6 +31,12 @@ EVERY_ERROR = [
     AlreadySubscribed,
     NotSubscribed,
     DuplicatePlan,
+    DuplicatePromoCode,
+    UnknownPromoCode,
+    PromoLimitReached,
+    PromoAlreadyBound,
+    DuplicateReferralProgram,
+    UnknownReferralProgram,
 ]
 
 VALIDATION_ERRORS = [InvalidPlan, InvalidPromoCode, InvalidPeriod, InvalidReferralProgram]
@@ -58,6 +70,12 @@ def test_the_base_error_is_not_a_value_error() -> None:
     assert not issubclass(AlreadySubscribed, ValueError)
     assert not issubclass(NotSubscribed, ValueError)
     assert not issubclass(DuplicatePlan, ValueError)
+    assert not issubclass(DuplicatePromoCode, ValueError)
+    assert not issubclass(UnknownPromoCode, ValueError)
+    assert not issubclass(PromoLimitReached, ValueError)
+    assert not issubclass(PromoAlreadyBound, ValueError)
+    assert not issubclass(DuplicateReferralProgram, ValueError)
+    assert not issubclass(UnknownReferralProgram, ValueError)
 
 
 def test_errors_carry_their_message() -> None:

@@ -259,13 +259,6 @@ async def test_the_catch_up_events_of_subscribe_are_dated_at_the_boundary() -> N
     assert sink[1].occurred_at == utc(2026, 2, 10)
 
 
-async def test_the_promo_argument_is_accepted_and_ignored_for_now() -> None:
-    """The signature is fixed already so that promo codes do not change it later."""
-    sub = await world(FrozenClock(START)).subscribe("user_1", "pro", promo="WELCOME")
-
-    assert sub.promo_code is None
-
-
 async def test_access_during_a_trial() -> None:
     clock = FrozenClock(START)
     engine = world(clock)
