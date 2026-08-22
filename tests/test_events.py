@@ -12,6 +12,9 @@ from substate import (
     PaymentRecorded,
     PaymentUnderpaid,
     PaymentUnmatched,
+    PromoKind,
+    PromoRedeemed,
+    ReferralAccrued,
     State,
     SubscriptionActivated,
     SubscriptionCancelled,
@@ -40,6 +43,10 @@ def every_event() -> list[Event]:
             "user_1", NOW, provider="cryptobot", external_id="inv_1", amount=100, expected=29900
         ),
         PaymentUnmatched("user_1", NOW, provider="cryptobot", external_id="inv_1", amount=29900),
+        PromoRedeemed("user_1", NOW, code="WELCOME", kind=PromoKind.PERCENT),
+        ReferralAccrued(
+            "user_1", NOW, referred_user_id="user_2", program_id="bloggers", amount=8970
+        ),
     ]
 
 
@@ -73,6 +80,8 @@ def test_the_names_are_the_ones_from_the_spec() -> None:
         "payment.duplicate",
         "payment.underpaid",
         "payment.unmatched",
+        "promo.redeemed",
+        "referral.accrued",
     ]
 
 
@@ -98,3 +107,20 @@ def test_an_underpayment_carries_both_numbers() -> None:
     )
 
     assert (event.amount, event.expected) == (100, 29900)
+
+
+def test_an_accrual_says_who_earned_it_and_for_whom() -> None:
+    """user_id is the referrer, the one whose balance grew."""
+    event = ReferralAccrued(
+        "blogger_1", NOW, referred_user_id="user_2", program_id="bloggers", amount=8970
+    )
+
+    assert event.user_id == "blogger_1"
+    assert event.referred_user_id == "user_2"
+    assert (event.program_id, event.amount) == ("bloggers", 8970)
+
+
+def test_a_redemption_says_which_code_and_what_kind() -> None:
+    event = PromoRedeemed("user_1", NOW, code="FREEWEEK", kind=PromoKind.PLUS_DAYS)
+
+    assert (event.code, event.kind) == ("FREEWEEK", PromoKind.PLUS_DAYS)
