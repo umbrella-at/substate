@@ -7,7 +7,7 @@ Subscription lifecycle for Python: trials, renewals, grace periods, promo codes 
 
 <!-- PyPI badges go back in with the v0.1.0 release -->
 
-<!-- TODO before release: asciinema cast of the test suite fast-forwarding a year of subscriptions in ~200ms -->
+![The test suite: 774 tests, 99% coverage, 1.6 seconds](docs/test-run.svg)
 
 ## Why
 

@@ -356,3 +356,14 @@ async def test_the_webhook_example_from_the_readme() -> None:
     assert parsed.currency == "USDT"
     assert parsed.payment.amount == 5_000_000  # 5.00 USDT in minor units
     assert [event.name for event in events] == ["payment.recorded", "subscription.activated"]
+
+
+def test_the_picture_and_the_suite_agree_on_the_numbers() -> None:
+    """The README's screenshot states a test count. A screenshot that lies is worse
+    than none, so the number in the image, in its alt text and in the suite match."""
+    picture = (README.parent / "docs" / "test-run.svg").read_text()
+    claimed = re.search(r"(\d+) passed", picture)
+    advertised = re.search(r"!\[The test suite: (\d+) tests", README.read_text())
+
+    assert claimed is not None and advertised is not None
+    assert claimed.group(1) == advertised.group(1)
