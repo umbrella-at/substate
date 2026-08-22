@@ -31,10 +31,12 @@ Zero required dependencies. Payment and storage adapters are optional extras.
 
 ```python
 import asyncio
-from substate import SubscriptionEngine, MemoryStorage, Plan, Payment, Period
+from substate import SubscriptionEngine, MemoryStorage, FrozenClock, Plan, Payment, Period
 
 async def main():
-    engine = SubscriptionEngine(storage=MemoryStorage())
+    clock = FrozenClock("2026-01-01")   # the real clock in production;
+                                        # frozen here so the output is exact
+    engine = SubscriptionEngine(storage=MemoryStorage(), clock=clock)
 
     engine.register_plan(Plan(
         id="pro_month",

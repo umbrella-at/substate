@@ -33,7 +33,8 @@ PRO_MONTH = Plan(
 
 
 async def test_the_quickstart_prints_what_it_says_it_prints() -> None:
-    engine = SubscriptionEngine(storage=MemoryStorage(), clock=FrozenClock("2026-01-01"))
+    clock = FrozenClock("2026-01-01")  # the real clock in production
+    engine = SubscriptionEngine(storage=MemoryStorage(), clock=clock)
     engine.register_plan(PRO_MONTH)
 
     trial = await engine.subscribe("user_1", "pro_month")
