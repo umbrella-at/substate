@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
+import re
 from datetime import UTC, datetime
+from pathlib import Path
 
 from substate import (
     Accrual,
@@ -18,6 +21,7 @@ from substate import (
     SubscriptionEngine,
     SubscriptionExpired,
 )
+from substate import events as event_types
 
 PRO_MONTH = Plan(
     id="pro_month",
@@ -246,3 +250,30 @@ async def test_attribution_is_recorded_once_and_never_moves() -> None:
     sub = await engine.subscribe("user_1", "pro_month", referrer_id="someone_else")
 
     assert sub.referrer_id == "user_42"
+
+
+README = Path(__file__).resolve().parent.parent / "README.md"
+
+
+def documented_events() -> set[str]:
+    """The dotted names inside the README's event block."""
+    block = re.search(r"## Events\n.*?```\n(.*?)```", README.read_text(), re.S)
+    assert block is not None, "the README lost its event block"
+    return set(re.findall(r"[a-z]+\.[a-z_]+", block.group(1)))
+
+
+def emitted_events() -> set[str]:
+    """The dotted names of every event type the core can emit."""
+    return {
+        member.name
+        for _, member in inspect.getmembers(event_types, inspect.isclass)
+        if issubclass(member, Event) and member is not Event
+    }
+
+
+def test_the_readme_lists_every_event_the_core_emits() -> None:
+    assert emitted_events() == documented_events()
+
+
+def test_the_list_is_the_thirteen_from_the_spec() -> None:
+    assert len(emitted_events()) == 13
