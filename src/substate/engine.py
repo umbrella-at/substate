@@ -11,13 +11,24 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from substate.clock import Clock, SystemClock
-from substate.errors import AlreadySubscribed, DuplicatePlan, NotSubscribed, UnknownPlan
+from substate.errors import (
+    AlreadySubscribed,
+    DuplicatePlan,
+    DuplicatePromoCode,
+    NotSubscribed,
+    PromoAlreadyBound,
+    PromoLimitReached,
+    SubstateError,
+    UnknownPlan,
+    UnknownPromoCode,
+)
 from substate.events import (
     Event,
     PaymentDuplicate,
     PaymentRecorded,
     PaymentUnderpaid,
     PaymentUnmatched,
+    PromoRedeemed,
     SubscriptionActivated,
     SubscriptionCancelled,
     SubscriptionCreated,
@@ -26,7 +37,7 @@ from substate.events import (
     SubscriptionPlanChanged,
     SubscriptionRenewed,
 )
-from substate.models import Payment, Plan, State, Subscription
+from substate.models import Payment, Plan, PromoCode, PromoKind, ScopeKind, State, Subscription
 from substate.storage import Storage
 
 # A subscription can cross at most two boundaries (ACTIVE -> GRACE -> EXPIRED).
@@ -36,6 +47,13 @@ MAX_CATCH_UP_TRANSITIONS = 8
 
 # States a new cycle may be started on top of. Everything else is still live.
 _RESTARTABLE = (State.EXPIRED, State.CANCELLED)
+
+
+def _periods_of(promo: PromoCode) -> int | None:
+    """How many paid periods a discount covers. None means as long as the cycle lasts."""
+    if promo.applies_to.kind is ScopeKind.FIRST_PAYMENT:
+        return 1
+    return promo.applies_to.periods
 
 
 class SubscriptionEngine:
@@ -65,6 +83,7 @@ class SubscriptionEngine:
         self._clock = clock if clock is not None else SystemClock()
         self._on_event = on_event
         self._plans: dict[str, Plan] = {}
+        self._promo_codes: dict[str, PromoCode] = {}
 
     def register_plan(self, plan: Plan) -> None:
         """Add a plan. Ids are claimed once and for all.
@@ -77,7 +96,26 @@ class SubscriptionEngine:
             raise DuplicatePlan(f"a plan is already registered as {plan.id!r}")
         self._plans[plan.id] = plan
 
-    async def subscribe(self, user_id: str, plan_id: str, promo: str | None = None) -> Subscription:
+    def register_promo_code(self, promo: PromoCode) -> None:
+        """Add a promo code. Codes are claimed once, like plan ids.
+
+        Redeeming one takes three steps against the storage: claim a slot,
+        apply the code, save the subscription. In v0.1 those are three calls
+        rather than one transaction, so a failure between them burns the slot
+        with nothing to show for it. A storage adapter with real transactions
+        is where that closes, in v0.2.
+        """
+        if promo.code in self._promo_codes:
+            raise DuplicatePromoCode(f"a promo code is already registered as {promo.code!r}")
+        self._promo_codes[promo.code] = promo
+
+    async def subscribe(
+        self,
+        user_id: str,
+        plan_id: str,
+        promo: str | None = None,
+        referrer_id: str | None = None,
+    ) -> Subscription:
         """Start a cycle for this user and return the subscription.
 
         A plan with a trial starts in `TRIAL`. Without one the subscription
@@ -89,10 +127,19 @@ class SubscriptionEngine:
         referrer and the memory that a trial was already granted, and dropping
         everything that belonged to the previous cycle.
 
-        `promo` is accepted and ignored until promo codes land, so that adding
-        them does not change this signature.
+        `promo` is redeemed as part of the same call, by the same code path as
+        `redeem`. If the code is unknown or used up, the whole call fails and
+        no subscription is created: the caller can offer another code instead
+        of finding themselves already subscribed.
+
+        `referrer_id` is recorded once, on the first subscription, and never
+        moves again. It needs no referral program set up: without one the
+        attribution is still written down and the accrual is simply zero.
+        Recording who brought a user in and deciding what to pay for it are
+        different jobs, and the second is not a condition of the first.
         """
         plan = self._plan(plan_id)
+        promo_code = None if promo is None else self._promo_code(promo)
         now = self._clock.now()
         subscription, events = await self._load_and_advance(user_id)
 
@@ -103,11 +150,110 @@ class SubscriptionEngine:
         if subscription is None:
             subscription = Subscription(user_id=user_id, plan_id=plan_id, state=State.EXPIRED)
         self._begin_cycle(subscription, plan, now)
+        if subscription.referrer_id is None:
+            subscription.referrer_id = referrer_id
+
+        claimed: list[Event] = []
+        if promo_code is not None:
+            try:
+                claimed = await self._claim(subscription, promo_code, now)
+            except SubstateError:
+                self._publish(events)  # the catch-up happened; the subscription did not
+                raise
 
         await self._storage.save_subscription(subscription)
         events.append(SubscriptionCreated(user_id, now, plan_id=plan.id, state=subscription.state))
+        events.extend(claimed)
         self._publish(events)
         return subscription
+
+    async def redeem(self, user_id: str, code: str) -> Subscription:
+        """Claim a promo code for a subscription that already exists.
+
+        `PERCENT` and `FIXED` are bound to the subscription and come off its
+        next payments; only one discount can be bound at a time. `PLUS_DAYS`
+        is spent immediately on whichever boundary the current state runs on,
+        and binds nothing.
+        """
+        promo = self._promo_code(code)
+        now = self._clock.now()
+        subscription, events = await self._load_and_advance(user_id)
+        if subscription is None:
+            raise NotSubscribed(f"{user_id!r} has no subscription")
+
+        try:
+            claimed = await self._claim(subscription, promo, now)
+        except SubstateError:
+            self._publish(events)
+            raise
+
+        await self._storage.save_subscription(subscription)
+        events.extend(claimed)
+        self._publish(events)
+        return subscription
+
+    async def _claim(
+        self, subscription: Subscription, promo: PromoCode, now: datetime
+    ) -> list[Event]:
+        """Take one redemption of `promo` for this subscription and apply it.
+
+        Every refusal happens before the claim, so a code that cannot be
+        applied does not spend one of its slots.
+        """
+        binds = promo.kind is not PromoKind.PLUS_DAYS
+        if binds and subscription.promo_code is not None:
+            raise PromoAlreadyBound(
+                f"{subscription.user_id!r} already has {subscription.promo_code!r} attached"
+            )
+        claimed = await self._storage.try_redeem(
+            promo.code,
+            subscription.user_id,
+            max_total=promo.max_redemptions,
+            max_per_user=promo.max_per_user,
+        )
+        if not claimed:
+            raise PromoLimitReached(f"{promo.code!r} has no redemptions left")
+
+        events: list[Event] = [
+            PromoRedeemed(subscription.user_id, now, code=promo.code, kind=promo.kind)
+        ]
+        if binds:
+            subscription.promo_code = promo.code
+            subscription.promo_periods_left = _periods_of(promo)
+        else:
+            events.extend(self._grant_days(subscription, promo.value, now))
+        return events
+
+    def _grant_days(self, subscription: Subscription, days: int, now: datetime) -> list[Event]:
+        """Push the boundary this state runs on out by `days`. Does not save.
+
+        On a record with no access left the days become a trial rather than a
+        paid period: an ACTIVE subscription earns a grace period when it ends,
+        and grace is a courtesy to someone who has paid at least once.
+        """
+        granted = timedelta(days=days)
+        if subscription.state is State.TRIAL:
+            subscription.trial_ends_at = (subscription.trial_ends_at or now) + granted
+            return []
+        if subscription.state is State.EXPIRED:
+            subscription.state = State.TRIAL
+            subscription.trial_started_at = subscription.trial_started_at or now
+            subscription.trial_ends_at = now + granted
+            subscription.expires_at = None
+            return []
+
+        subscription.expires_at = (subscription.expires_at or now) + granted
+        if subscription.state is State.GRACE and subscription.expires_at > now:
+            subscription.state = State.ACTIVE
+            return [
+                SubscriptionActivated(
+                    subscription.user_id,
+                    now,
+                    plan_id=subscription.plan_id,
+                    expires_at=subscription.expires_at,
+                )
+            ]
+        return []
 
     def _begin_cycle(self, subscription: Subscription, plan: Plan, now: datetime) -> None:
         """Reset a record onto a fresh cycle of `plan`. The referrer survives."""
@@ -342,6 +488,12 @@ class SubscriptionEngine:
             return self._plans[plan_id]
         except KeyError:
             raise UnknownPlan(f"no plan is registered as {plan_id!r}") from None
+
+    def _promo_code(self, code: str) -> PromoCode:
+        try:
+            return self._promo_codes[code]
+        except KeyError:
+            raise UnknownPromoCode(f"no promo code is registered as {code!r}") from None
 
     async def _load_and_advance(self, user_id: str) -> tuple[Subscription | None, list[Event]]:
         """Read a subscription and bring it up to the clock before acting on it."""
