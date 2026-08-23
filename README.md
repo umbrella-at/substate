@@ -5,9 +5,9 @@ Subscription lifecycle for Python: trials, renewals, grace periods, promo codes 
 [![CI](https://github.com/umbrella-at/substate/actions/workflows/ci.yml/badge.svg)](https://github.com/umbrella-at/substate/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/substate)](https://pypi.org/project/substate/)
 [![Python](https://img.shields.io/pypi/pyversions/substate)](https://pypi.org/project/substate/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/umbrella-at/substate/blob/main/LICENSE)
 
-![The test suite: 774 tests, 99% coverage, 1.6 seconds](docs/test-run.svg)
+![The test suite: 774 tests, 99% coverage, 1.6 seconds](https://raw.githubusercontent.com/umbrella-at/substate/main/docs/test-run.svg)
 
 ## Why
 
